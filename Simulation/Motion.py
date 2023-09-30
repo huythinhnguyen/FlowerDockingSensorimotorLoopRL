@@ -16,15 +16,27 @@ def wrap_to_pi(a):
 
 
 class State:
-    def __init__(self, pose: ArrayLike, kinematic: ArrayLike, dt: float):
+    def __init__(self, pose: ArrayLike, kinematic: ArrayLike, dt: float,
+                 max_linear_velocity: float,
+                 max_angular_velocity: float,
+                 max_linear_acceleration: float,
+                 max_angular_acceleration: float,
+                 max_linear_deceleration: float,
+                 ):
         """ pose: [x, y, yaw] (meter, rad), kinematic: [v (m/s), w(rad/s)]
             dt = 1/echo_call_rate (s)
         """
         self.pose = np.asarray(pose).astype(np.float32).reshape(3,)
         self.kinematic = np.asarray(kinematic).astype(np.float32).reshape(2,)
-
+        self.previous_kinematics = np.copy(self.kinematic)
         self._init_state = np.concatenate((self.pose, self.kinematic))
         self.dt = dt
+        self.max_linear_velocity(max_linear_velocity)
+        self.max_angular_velocity(max_angular_velocity)
+        self.max_linear_acceleration(max_linear_acceleration)
+        self.max_angular_acceleration(max_angular_acceleration)
+        self.max_linear_deceleration(max_linear_deceleration)
+
 
     def run(self, *args, **kwargs) -> np.ndarray:
         return self._run(*args, **kwargs)
@@ -49,9 +61,27 @@ class State:
         angular_kwd = set(kwargs.keys()) & set(['w', 'new_w', 'rotational_rate', 'rot_rate', 'angular_velocity', 'angular_velo'])
         if velocity_kwd: kinematic[0] = kwargs[velocity_kwd.pop()]
         if angular_kwd: kinematic[1] = kwargs[angular_kwd.pop()]
+
+        kinematic = self._limit_acceleartion(kinematic)
+        kinematic = self._limit_velocity(kinematic)
+
         self.kinematic = np.asarray(kinematic).astype(np.float32).reshape(2,)
         return self.kinematic
     
+    def _limit_acceleartion(self, kinematic: ArrayLike):
+        v, w = kinematic
+        dv = v - self.previous_kinematics[0]
+        dw = w - self.previous_kinematics[1]
+        dv = np.clip(dv, self.max_linear_deceleration*self.dt, self.max_linear_acceleration*self.dt)
+        dw = np.clip(dw, -self.max_angular_acceleration*self.dt, self.max_angular_acceleration*self.dt)
+        return np.asarray([self.previous_kinematics[0]+dv, self.previous_kinematics[1]+dw])
+    
+    def _limit_velocity(self, kinematic: ArrayLike):
+        v, w = kinematic
+        v = np.clip(v, 0.0, self.max_linear_velocity)
+        w = np.clip(w, -self.max_angular_velocity, self.max_angular_velocity)
+        return np.asarray([v, w])
+
     def turning_radius(self):
         if np.abs(self.kinematic[1]) > 1e-6: return self.kinematic[0]/self.kinematic[1]
         else: return 'inf'
@@ -92,6 +122,46 @@ class State:
         self.update_kinematic(*args, **kwargs)
         self.update_pose()
         return self.pose
+
+    @property
+    def max_linear_velocity(self):
+        return self._max_linear_velocity
+    
+    @max_linear_velocity.setter
+    def max_linear_velocity(self, value):
+        self._max_linear_velocity = value
+
+    @property
+    def max_angular_velocity(self):
+        return self._max_angular_velocity
+    
+    @max_angular_velocity.setter
+    def max_angular_velocity(self, value):
+        self._max_angular_velocity = value
+
+    @property
+    def max_linear_acceleration(self):
+        return self._max_linear_acceleration
+    
+    @max_linear_acceleration.setter
+    def max_linear_acceleration(self, value):
+        self._max_linear_acceleration = value
+
+    @property
+    def max_angular_acceleration(self):
+        return self._max_angular_acceleration
+    
+    @max_angular_acceleration.setter
+    def max_angular_acceleration(self, value):
+        self._max_angular_acceleration = value
+
+    @property
+    def max_linear_deceleration(self):
+        return self._max_linear_deceleration
+    
+    @max_linear_deceleration.setter
+    def max_linear_deceleration(self, value):
+        self._max_linear_deceleration = value
 
 
 class GPS:
