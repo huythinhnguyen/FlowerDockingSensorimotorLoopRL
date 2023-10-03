@@ -9,4 +9,6 @@ After downloading the file, please extract and place the `flower3x_snippet` fold
 
 Use the convenient script `install_dataset.sh` to set up the dataset if necessary.
 
-## 
+## Demo
+1. Visualize the waveforms bats experienced with a single band freq. 1 bat 1 flower in the scence.
+run `python apps/VisualizerFlowerEcho.py`
