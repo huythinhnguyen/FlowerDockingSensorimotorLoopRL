@@ -21,5 +21,6 @@ def get_emission_snippet():
     return np.load(EMISSION_SNIPPET_PATH)
 
 def get_snippet(distance, orientation, neck_angle):
+    #print('referencing from dist={}, neck={}, orient={}'.format(distance, neck_angle, orientation))
     return np.load(os.path.join(SNIPPET_PATH, 'dist'+str(np.round(distance, 1)),  'orient'+str(int(orientation)), 'neck'+str(int(neck_angle))+'.npz'))
 

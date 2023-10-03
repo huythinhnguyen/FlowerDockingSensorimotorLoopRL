@@ -31,11 +31,11 @@ class State:
         self.previous_kinematics = np.copy(self.kinematic)
         self._init_state = np.concatenate((self.pose, self.kinematic))
         self.dt = dt
-        self.max_linear_velocity(max_linear_velocity)
-        self.max_angular_velocity(max_angular_velocity)
-        self.max_linear_acceleration(max_linear_acceleration)
-        self.max_angular_acceleration(max_angular_acceleration)
-        self.max_linear_deceleration(max_linear_deceleration)
+        self.max_linear_velocity = max_linear_velocity
+        self.max_angular_velocity= max_angular_velocity
+        self.max_linear_acceleration = max_linear_acceleration
+        self.max_angular_acceleration= max_angular_acceleration
+        self.max_linear_deceleration = max_linear_deceleration
 
 
     def run(self, *args, **kwargs) -> np.ndarray:
@@ -53,18 +53,16 @@ class State:
         else: kinematic = self._init_state[3:]
         self._init_state = np.concatenate((self.pose, self.kinematic))
 
-    def update_kinematic(self, kinematic: ArrayLike = [], *kwargs):
+    def update_kinematic(self, kinematic: ArrayLike = [], **kwargs):
         """ kinematic: [v (m/s), w(rad/s)]
         """
-        if len(kinematic)==0: kinematic = [0.,0.]
+        if len(kinematic)==0: kinematic = self.kinematic
         velocity_kwd =  set(kwargs.keys()) & set(['v', 'new_v', 'velocity', 'velo'])
         angular_kwd = set(kwargs.keys()) & set(['w', 'new_w', 'rotational_rate', 'rot_rate', 'angular_velocity', 'angular_velo'])
         if velocity_kwd: kinematic[0] = kwargs[velocity_kwd.pop()]
         if angular_kwd: kinematic[1] = kwargs[angular_kwd.pop()]
-
         kinematic = self._limit_acceleartion(kinematic)
         kinematic = self._limit_velocity(kinematic)
-
         self.kinematic = np.asarray(kinematic).astype(np.float32).reshape(2,)
         return self.kinematic
     

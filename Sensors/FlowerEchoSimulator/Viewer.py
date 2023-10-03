@@ -35,12 +35,32 @@ def wrapTo180(x):
     return np.mod(x + 180, 360) - 180
 
 
-
-class FieldOfView:
-    def __init__(self,FoVs: list[list]=ViewerSetting.FOVS):
-        self.FoVs = FoVs
+class FieldOfViewBase:
+    def __init__(self):
         self.intput_angular_unit = 'radian'
-        self.output_angular_unit = 'degree'
+        self.output_angular_unit = 'radian'
+
+    @property
+    def filtered_objects_inview_polar(self) -> ArrayLike:
+        return self._filtered_objects_inview_polar
+    
+    @filtered_objects_inview_polar.setter
+    def filtered_objects_inview_polar(self, value: ArrayLike):
+        self._filtered_objects_inview_polar = value
+
+    @property
+    def filtered_objects_inview_cartesian(self) -> ArrayLike:
+        return self._filtered_objects_inview_cartesian
+    
+    @filtered_objects_inview_cartesian.setter
+    def filtered_objects_inview_cartesian(self, value: ArrayLike):
+        self._filtered_objects_inview_cartesian = value
+
+
+class FieldOfView(FieldOfViewBase):
+    def __init__(self,FoVs: list[list]=ViewerSetting.FOVS):
+        super().__init__()
+        self.FoVs = FoVs
 
     def run(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike):
         if self.intput_angular_unit=='degree':
@@ -48,7 +68,12 @@ class FieldOfView:
             cartesian_objects_matrix[:,2] = np.radians(cartesian_objects_matrix[:,2])
         polar_objects_matrix = self._convert_objects_from_cartesian_to_polar_format(bat_pose, cartesian_objects_matrix)
         polar_objects_matrix = self._filter_objects_in_fov(polar_objects_matrix)
-        return polar_objects_matrix
+        # cache filtered objects in view
+        #print(polar_objects_matrix)
+        if self.output_angular_unit=='degree':
+            polar_objects_matrix[:,1:3] = np.degrees(polar_objects_matrix[:,1:3])
+        self.filtered_objects_inview_polar = polar_objects_matrix
+        return np.copy(polar_objects_matrix)
     
     def __call__(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike):
         return self.run(bat_pose, cartesian_objects_matrix)

@@ -379,6 +379,8 @@ class Render(RenderBase):
     def run(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike,):
         if type(cartesian_objects_matrix)==list: cartesian_objects_matrix = np.asarray(cartesian_objects_matrix).reshape(-1,4)
         polar_objects_matrix = self.viewer(bat_pose, cartesian_objects_matrix)
+        if self.viewer.output_angular_unit in ['radians', 'rad', 'radian']:
+            polar_objects_matrix[:,1:3] = np.degrees(polar_objects_matrix[:,1:3])
         echo_snippets_left, echo_snippets_right = self.fetch.get_echo_snippets(polar_objects_matrix)
         emission_left, emission_right = self.fetch.get_emission_snippet()
         noise_left, noise_right = self.fetch.get_noise_sample()
