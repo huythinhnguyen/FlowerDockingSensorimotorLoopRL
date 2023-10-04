@@ -1,253 +1,150 @@
 import os
 import sys
-import pathlib
-
-REPO_NAME = 'FlowerDockingSensorimotorLoopRL'
-REPO_PATH = os.path.abspath(__file__)
-while os.path.basename(REPO_PATH) != REPO_NAME: REPO_PATH = os.path.dirname(REPO_PATH)
-if REPO_PATH not in sys.path: sys.path.append(REPO_PATH)
-
-import time
-
-from Gym.BatSnake_v0.Environment import DiscreteAction
 
 import numpy as np
+
+import reverb
 import tensorflow as tf
-tf.autograph.set_verbosity(0)
+
+tf.autograph.set_verbosity(1)
 
 from tf_agents.agents.dqn import dqn_agent
+from tf_agents.drivers import py_driver
+from tf_agents.environments import suite_gym
 from tf_agents.environments import tf_py_environment
-
-from tf_agents.policies import random_tf_policy, policy_saver
+from tf_agents.eval import metric_utils
+from tf_agents.metrics import tf_metrics
 from tf_agents.networks import sequential
-from tf_agents.replay_buffers import tf_uniform_replay_buffer
+from tf_agents.policies import py_tf_eager_policy
+from tf_agents.policies import random_tf_policy
+from tf_agents.replay_buffers import reverb_replay_buffer
+from tf_agents.replay_buffers import reverb_utils
 from tf_agents.trajectories import trajectory
 from tf_agents.specs import tensor_spec
 from tf_agents.utils import common
 
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.initializers import RandomUniform, Constant, VarianceScaling
-from tensorflow.keras.activations import relu, linear
+from .Environment import SimpleFlowerDocking
 
-HIDDEN_LAYER_PARAMS = (128, 128, 128, 64)
+from .LearningConfig import *
 
-TRAINING_STEPS = 3_000_000
-INITIAL_COLLECTION_STEPS = 1_000
-COLLECT_STEPS_PER_ITERATION = 1
-REPLAY_BUFFER_MAX_LENGTH = 1_000_000
+class MyLinearEpsilonDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, initial_epsilon, final_epsilon, decay_steps):
+        super().__init__()
+        self.initial_epsilon = initial_epsilon
+        self.final_epsilon = final_epsilon
+        self.decay_steps = decay_steps
 
-PARALLEL_CALLS = 32
-BATCH_SIZE = 1024
-LEARNING_RATE = 1e-4
-LOG_STEPS_INTERVAL = 20_000
-NUMBER_OF_EVAL_EPISODES = 10
-EVAL_STEPS_INTERVAL = 20_000
-POLICY_SAVER_INTERVAL = 500_000
+    def __call__(self, step):
+        if step > self.decay_steps:
+            return self.final_epsilon
+        else: # decay linearly
+            return self.initial_epsilon - (self.initial_epsilon - self.final_epsilon) * step / self.decay_steps
 
-STARTING_EPSILON = 0.9
-EPSILON_DECAY_COUNT = 6_000_000
-ENDING_EPSILON = 0.1
-DISCOUNT_FACTOR = 0.999
-TD_ERROR_LOSS_FUNCTION = common.element_wise_squared_loss
-TRAIN_STEP_COUNTER = 0
-# Try Huber_loss this time
-DATE = '10.10.22'
-NOTES =''
-CHECKPOINT_DIRECTORY = 'TrainedAgents'
-TIME_LIMIT = 500
-DIFFICULTY = 0
 
-INIT_POLICY = None # help.load_policy(checkpoint_dir=CHECKPOINT_DIRECTORY, agent_id='09.15.22') # Placed Previously Trained Policy Here.
+def dense_layer(num_units):
+    return tf.keras.layers.Dense(
+        units=num_units,
+        activation=tf.keras.activations.relu,
+        kernel_initializer=tf.keras.initializers.VarianceScaling(
+            scale=2.0, mode='fan_in', distribution='truncated_normal'))
 
-LEVEL_UP_THRESHOLD = 1.
-MOVING_AVG_POINTS = 5
+def create_mlp_network(num_actions, layers_params=(100,)):
+    dense_layers = [dense_layer(num_units) for num_units in layers_params]
+    q_values_layer = tf.keras.layers.Dense(
+        num_actions,
+        activation=None,
+        kernel_initializer=tf.keras.initializers.RandomUniform(
+            minval=-0.03, maxval=0.03),
+        bias_initializer=tf.keras.initializers.Constant(-0.2))
+    return sequential.Sequential(dense_layers + [q_values_layer])
 
-### Build some Function building model here!
-### Build some convenience saver if needed. :D
-### ADD Setting if needed
-
-def hidden_layer(number_of_units):
-    return Dense(number_of_units, activation=relu,
-                  kernel_initializer=VarianceScaling(scale=2.0, mode='fan_in', distribution='truncated_normal'))
-
-def value_layer(number_of_actions):
-    return Dense(number_of_actions, kernel_initializer=RandomUniform(minval=-0.05, maxval=0.05), bias_initializer=Constant(-0.2))
-
-def q_network(hidden_layer_params, number_of_actions):
-    hidden_net = [hidden_layer(number_of_units) for number_of_units in hidden_layer_params]
-    q_layer = value_layer(number_of_actions)
-    return sequential.Sequential(hidden_net + [q_layer])
-
-def summon_agent(environment, q_network, optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-                starting_epsilon=STARTING_EPSILON, epsilon_delay_count=EPSILON_DECAY_COUNT, ending_epsilon=ENDING_EPSILON,
-                gamma = DISCOUNT_FACTOR, td_loss_fn = TD_ERROR_LOSS_FUNCTION):
-    return dqn_agent.DqnAgent(
-        time_step_spec=environment.time_step_spec(),
-        action_spec=environment.action_spec(),
-        q_network=q_network,
+def sumon_agent(train_env, create_q_network=create_mlp_network, 
+                td_errors_loss_fn=common.element_wise_squared_loss,
+                initialize=True):
+    optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)
+    epsilon_schedule = MyLinearEpsilonDecay(STARTING_EPSILON, ENDING_EPSILON, EXPLORE_STEPS)
+    train_step_counter = tf.Variable(0)
+    num_actions = train_env.action_spec().maximum - train_env.action_spec().minimum + 1
+    q_net = create_q_network(num_actions, MLP_LAYERS_PARAMS)
+    agent = dqn_agent.DqnAgent(
+        time_step_spec=train_env.time_step_spec(),
+        action_spec=train_env.action_spec(),
+        q_network=q_net,
         optimizer=optimizer,
-        epsilon_greedy=starting_epsilon,
-        epsilon_decay_end_count=epsilon_delay_count,
-        epsilon_decay_end_value=ending_epsilon,
-        gamma=gamma, td_errors_loss_fn=td_loss_fn, train_step_counter= tf.Variable(TRAIN_STEP_COUNTER))
+        epsilon_greedy=epsilon_schedule,
+        td_errors_loss_fn=td_errors_loss_fn,
+        train_step_counter=train_step_counter,
+    )
+    if initialize: agent.initialize()
+    return agent
 
-def summon_replay_buffer(agent, environment, max_length):
-    return tf_uniform_replay_buffer.TFUniformReplayBuffer(
-        data_spec = agent.collect_data_spec, batch_size= environment.batch_size, 
-        max_length=max_length)
+def create_replay_buffer(agent):
+    table_name = 'uniform_table'
+    replay_buffer_signature = tensor_spec.from_spec(agent.collect_data_spec)
+    replay_buffer_signature = tensor_spec.add_outer_dim(replay_buffer_signature)
+    table = reverb.Table(
+        table_name,
+        max_size=REPLAY_BUFFER_CAPACITY,
+        sampler=reverb.selectors.Uniform(),
+        remover=reverb.selectors.Fifo(),
+        rate_limiter=reverb.rate_limiters.MinSize(1))
+    
+    reverb_server = reverb.Server([table])
 
-def collect_step(environment, policy, buffer):
-    time_step = environment.current_time_step()
-    action_step = policy.action(time_step)
-    next_time_step = environment.step(action_step.action)
-    buffer.add_batch(trajectory.from_transition(time_step, action_step, next_time_step))
+    replay_buffer = reverb_replay_buffer.ReverbReplayBuffer(
+        agent.collect_data_spec,
+        table_name=table_name,
+        sequence_length=REPLAY_BUFFER_SEQUENCE_LENGTH,
+        local_server=reverb_server)
+    
+    rb_observer = reverb_utils.ReverbAddTrajectoryObserver(
+        replay_buffer.py_client,
+        table_name,
+        sequence_length=REPLAY_BUFFER_SEQUENCE_LENGTH,)
 
-def collect_data(environment, policy, buffer, steps):
-    for _ in range(steps):
-        collect_step(environment, policy, buffer)
+    return replay_buffer, rb_observer, replay_buffer
 
-def compute_average_return(environment, policy, number_of_episodes, getcache=False):
-    total_return = 0
-    cache = []
-    for episode in range(number_of_episodes):
-        time_step = environment._reset()
-        episode_return = 0
+
+
+def create_q_networks(num_actions, layers_params):
+    q_net = create_mlp_network(num_actions, layers_params)
+    return q_net
+
+def compute_average_return(environment, policy, num_episodes):
+    total_return = 0.0
+    for _ in range(num_episodes):
+        time_step = environment.reset()
+        episode_return = 0.0
         while not time_step.is_last():
             action_step = policy.action(time_step)
-            time_step = environment._step(action_step.action)
-            episode_return += time_step.reward
-        else:
-            total_return += episode_return
-            cache.append(episode_return.numpy()[0])
-    if getcache: return (total_return/number_of_episodes).numpy()[0], cache
-    else: return (total_return/number_of_episodes).numpy()[0]
+            time_step = environment.step(action_step.action)
+            episode_return += time_step.reward.numpy()
+        total_return += episode_return
+    avg_return = total_return / num_episodes
+    return avg_return.numpy()[0]
 
 
-def train_v1(init_policy=None):
-    phase = 0
-    py_env = DiscreteAction(time_limit = TIME_LIMIT, difficulty=0, phase=phase, log=True)
-    tf_env = tf_py_environment.TFPyEnvironment(py_env)
-    #action_tensor_spec = tensor_spec.from_spec(py_env.action_spec())
-    num_actions = 2 #action_tensor_spec.maximum - action_tensor_spec.minimum + 1
-    q_net = q_network(hidden_layer_params=HIDDEN_LAYER_PARAMS, number_of_actions=num_actions)
+
+def train_from_random():
+    train_py_env = SimpleFlowerDocking()
+    eval_py_env = SimpleFlowerDocking()
+    train_env = tf_py_environment.TFPyEnvironment(train_py_env)
+    eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
+    agent = sumon_agent(train_env)
+    replay_buffer, rb_observer, replay_buffer = create_replay_buffer(agent)
     
-    eval_py_env = DiscreteAction(time_limit = TIME_LIMIT, difficulty=0, phase=phase, log=True)
-    eval_tf_env = tf_py_environment.TFPyEnvironment(eval_py_env)
 
-    agent = summon_agent(tf_env, q_net)
-    agent.initialize()
-    eval_policy = agent.policy
-    collect_policy = agent.collect_policy
-    
-    ### COLLECT INIT REPLAY BUFFER
-
-    replay_buffer = summon_replay_buffer(agent=agent, environment=tf_env, max_length=REPLAY_BUFFER_MAX_LENGTH)
-    if init_policy is None: init_policy = random_tf_policy.RandomTFPolicy(tf_env.time_step_spec(), tf_env.action_spec())
-    collect_data(tf_env, init_policy, replay_buffer, INITIAL_COLLECTION_STEPS)
-    dataset = replay_buffer.as_dataset(
-        num_parallel_calls=PARALLEL_CALLS,
-        sample_batch_size=BATCH_SIZE,
-        num_steps=2,
-        single_deterministic_pass=False).prefetch(PARALLEL_CALLS)
-    iterator = iter(dataset)
-
-    ### TRAINING START HERE.
+    # (Optional) Optimize by wrapping some of the code in a graph using TF function.
     agent.train = common.function(agent.train)
-    agent.train_step_counter.assign(TRAIN_STEP_COUNTER)
+
+    # Reset the train step.
+    agent.train_step_counter.assign(0)
+
+    # Evaluate the agent's policy once before training.
+    avg_return = compute_average_return(eval_env, agent.policy, NUMBER_OF_EVAL_EPISODES)
+    returns = [avg_return]
+
+    # Reset the environment.
+    time_step = train_py_env.reset()
+
     
-    #average_return = compute_average_return(eval_tf_env, eval_policy, NUMBER_OF_EVAL_EPISODES, getcache=False)
-    returns = []
-    losses = []
-    training_episodes = []
-    training_steps = []
-    phases = []
-    tic = time.time()
-    times = []
-
-    print('Current Dir:', os.getcwd())
-    if CHECKPOINT_DIRECTORY=='':
-        prompt = input('ENTER SAVE PATH FOR POLICY')
-        save_dir = os.path.join(os.getcwd(), prompt+'/'+DATE+NOTES)
-    else: save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), CHECKPOINT_DIRECTORY+'/'+DATE+NOTES)
-    print('Policy will be save to:\n', save_dir)
-    policy_dir = os.path.join(save_dir, 'policy')
-    checkpoint_dir = os.path.join(save_dir,'checkpoint')
-
-    if not os.path.exists(checkpoint_dir): os.makedirs(checkpoint_dir)
-    if not os.path.exists(policy_dir): os.makedirs(policy_dir)
-    tf_policy_saver = policy_saver.PolicySaver(eval_policy)
-    
-
-    for _ in range(TRAINING_STEPS):
-        collect_data(tf_env, collect_policy, replay_buffer, COLLECT_STEPS_PER_ITERATION)
-        experience, used_info = next(iterator)
-        train_loss = agent.train(experience).loss
-        step = agent.train_step_counter.numpy()
-
-        if step % LOG_STEPS_INTERVAL == 0:
-            print('step={0}: loss={1}'.format(step, train_loss))
-            losses.append(train_loss)
-        if step % EVAL_STEPS_INTERVAL == 0:
-            # save policy:
-            if step%POLICY_SAVER_INTERVAL==0:
-                tf_policy_saver.save( os.path.join(policy_dir,str(int(step/1e6))+'M_steps'))
-                tf_policy_saver.save_checkpoint(checkpoint_dir)
-            print('--- Evaluation ---')
-            eval_py_env.episode = 0
-            average_return = compute_average_return(eval_tf_env, eval_policy, NUMBER_OF_EVAL_EPISODES, getcache=False)
-            time_elapse = np.round(time.time() - tic)
-            print('step={0}: return={1}. phase={2} Time elapse: {3}h{4}m'.format(step, average_return, py_env.cache['phase'],
-            int(np.floor(time_elapse/3600)), int(np.round(time_elapse%3600/60))))
-            returns.append(average_return)
-            training_episodes.append(py_env.episode)
-            training_steps.append(step)
-            phases.append(phase)
-            times.append(time_elapse)
-
-            if step == 500_000:
-                phase = 1
-                py_env.cache['phase']=phase
-                eval_py_env.cache['phase']=phase
-            if step == 1_000_000:
-                phase = 2
-                py_env.cache['phase']=phase
-                eval_py_env.cache['phase']=phase
-            if step == 1_500_000:
-                py_env.cache['max_level']=4
-                eval_py_env.cache['max_level']=4
-            if step == 2_000_000:
-                phase = 3
-                py_env.cache['phase']=phase
-                eval_py_env.cache['phase']=phase
-            np.savez(save_dir+'/return_loss_log.npz', losses=np.asarray(losses), returns=np.asarray(returns),
-                    episodes=np.asarray(training_episodes), steps=np.asarray(training_steps), phases=np.asarray(phases), times=np.asarray(times))
-            np.savez(save_dir+'/training_log.npz', episode=np.asarray(py_env.records['episode']), steps=np.asarray(py_env.records['steps']),
-                    hit=np.asarray(py_env.records['hit']), success=np.asarray(py_env.records['success']), hitfood=np.asarray(py_env.records['hitfood']),
-                    timeout=np.asarray(py_env.records['timeout']), outbound=np.asarray(py_env.records['outbound']))
-
-            if average_return >= 8 and phase==3:
-                print('--- Reach Early Stop Condition. Eval for 20 episodes ---')
-                eval_py_env.episode = 0
-                eval_avg_returns = compute_average_return(eval_tf_env, eval_policy, 20, getcahce=False)
-                if eval_avg_returns>=8: 
-                    print('--EARLY STOP REACHED--. Average Returns = {0}'.format(np.round(eval_avg_returns,2)))
-                    break
-
-
-    from matplotlib import pyplot as plt
-
-    fig, ax = plt.subplots(2,1)
-    ax[0].plot(training_steps,returns)
-    ax[0].set_ylabel('average episode return')
-    ax[0].set_xlabel('training steps')
-    ax[1].plot(np.linspace(np.min(training_steps), np.max(training_steps), len(losses) ), losses)
-    ax[1].set_ylabel('loss')
-    ax[1].set_xlabel('training steps')
-    plt.show()
-
-    return None
-
-
-
-if __name__=='__main__':
-    train_v1(init_policy=INIT_POLICY)
