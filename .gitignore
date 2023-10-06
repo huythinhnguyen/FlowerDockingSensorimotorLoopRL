@@ -1,5 +1,7 @@
 # Ensonification Data
 Dataset/
+saved_models/
+test/saved_models*
 
 # Editors
 .vscode/
