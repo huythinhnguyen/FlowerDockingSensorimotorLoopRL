@@ -84,15 +84,21 @@ def utest_render_2():
 
     fig.subplots_adjust(bottom=0.25)
 
-    sdistance = widgets.Slider(axdistance, 'Distance (m)', 0.18, 3.0, valinit=init_dist, valstep=0.02, orientation='horizontal')
+    sdistance = widgets.Slider(axdistance, 'Distance (m)', 0.01, 3.0, valinit=init_dist, valstep=0.01, orientation='horizontal')
     sbatorient = widgets.Slider(axbatorient, 'Bat Orient (\u00b0)', -180, 180, valinit=0., valstep=0.1, orientation='horizontal')
     sflowerorient = widgets.Slider(axflowerorient, 'Flower Orient (\u00b0)', -180, 180, valinit=0., valstep=0.1, orientation='horizontal')
 
     def update(val):
+        bat_pose = np.zeros(3).astype(float)
         bat_pose[2] = Spatializer.wrapToPi(np.radians(sbatorient.val) + init_bat_orientation)
         cartesian_objects_matrix[0,1] = sdistance.val
         cartesian_objects_matrix[0,2] = Spatializer.wrapToPi(np.radians(sflowerorient.val) + init_flower_orientation)
         render.run(bat_pose, cartesian_objects_matrix)
+        if render.viewer.collision_status==True:
+            bat_arrow.set_color('r')
+            bat_pose = np.copy(render.viewer.bat_pose)
+        else:
+            bat_arrow.set_color('k')
         bat_arrow.set_data(x=bat_pose[0], y=bat_pose[1],
             dx=bat_arrow_length*np.cos(bat_pose[2]), dy=bat_arrow_length*np.sin(bat_pose[2]))
         flower_arrow.set_data(x=cartesian_objects_matrix[0,0], y=cartesian_objects_matrix[0,1],

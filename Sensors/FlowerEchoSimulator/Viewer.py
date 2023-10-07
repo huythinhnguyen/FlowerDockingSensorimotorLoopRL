@@ -1,6 +1,7 @@
 import os
 import sys
 import numpy as np
+from typing import Tuple
 from numpy.typing import ArrayLike
 from typing import List
 
@@ -56,27 +57,73 @@ class FieldOfViewBase:
     def filtered_objects_inview_cartesian(self, value: ArrayLike):
         self._filtered_objects_inview_cartesian = value
 
+    @property
+    def collision_status(self) -> bool:
+        return self._collision_status
+    
+    @collision_status.setter
+    def collision_status(self, value: bool):
+        self._collision_status = value
 
-class FieldOfView(FieldOfViewBase):
-    def __init__(self,FoVs: list[list]=ViewerSetting.FOVS):
-        super().__init__()
-        self.FoVs = FoVs
+    @property
+    def collision_object_ID(self) -> int:
+        return self._collision_object_ID
+    
+    @collision_object_ID.setter
+    def collision_object_ID(self, value: int):
+        self._collision_object_ID = value
+
+    @property
+    def bat_pose(self) -> ArrayLike:
+        return self._bat_pose
+    
+    @bat_pose.setter
+    def bat_pose(self, value: ArrayLike):
+        self._bat_pose = value
 
     def run(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike):
+        raise NotImplementedError
+    
+    def __call__(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike):
+        return self.run(bat_pose, cartesian_objects_matrix)
+
+
+class FieldOfView(FieldOfViewBase):
+    def __init__(self,FoVs: list[list]=ViewerSetting.FOVS, collision_distance:float = ViewerSetting.COLLISION_THRESHOLD):
+        super().__init__()
+        self.FoVs = FoVs
+        self.collision_distance = collision_distance
+
+    def run(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike):
+        self.bat_pose = np.copy(bat_pose)
         if self.intput_angular_unit=='degree':
             bat_pose[2] = np.radians(bat_pose[2])
             cartesian_objects_matrix[:,2] = np.radians(cartesian_objects_matrix[:,2])
         polar_objects_matrix = self._convert_objects_from_cartesian_to_polar_format(bat_pose, cartesian_objects_matrix)
+        if self._collision_check(polar_objects_matrix):
+            self._bounce_bat_pose_back_to_collision_distance(bat_pose, cartesian_objects_matrix)
+            polar_objects_matrix = self._convert_objects_from_cartesian_to_polar_format(self.bat_pose, cartesian_objects_matrix)
         polar_objects_matrix = self._filter_objects_in_fov(polar_objects_matrix)
-        # cache filtered objects in view
-        #print(polar_objects_matrix)
         if self.output_angular_unit=='degree':
             polar_objects_matrix[:,1:3] = np.degrees(polar_objects_matrix[:,1:3])
         self.filtered_objects_inview_polar = polar_objects_matrix
         return np.copy(polar_objects_matrix)
-    
-    def __call__(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike):
-        return self.run(bat_pose, cartesian_objects_matrix)
+
+    def _collision_check(self, polar_objects_matrix):
+        if np.any(polar_objects_matrix[:,0] <= self.collision_distance):
+            self.collision_status = True
+            self.collision_object_ID = np.argmin(polar_objects_matrix[:,0])
+        else:
+            self.collision_status = False
+            self.collision_object_ID = -1
+        return self.collision_status
+
+    def _bounce_bat_pose_back_to_collision_distance(self, bat_pose, cartesian_objects_matrix):
+        x_collide_object, y_collide_object = cartesian_objects_matrix[self.collision_object_ID,:2]
+        x_bat, y_bat = bat_pose[:2]
+        angle_object_to_bat = np.arctan2(y_bat-y_collide_object, x_bat-x_collide_object)
+        self.bat_pose[0] = x_collide_object + self.collision_distance * np.cos(angle_object_to_bat)
+        self.bat_pose[1] = y_collide_object + self.collision_distance * np.sin(angle_object_to_bat)
 
     def _filter_objects_in_fov(self, polar_objects_matrix):
         # result = np.empty((0, polar_objects_matrix.shape[1]))

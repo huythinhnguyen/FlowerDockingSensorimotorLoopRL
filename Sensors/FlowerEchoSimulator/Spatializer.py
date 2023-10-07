@@ -398,7 +398,7 @@ class Render(RenderBase):
         if self.render_mode == 'compress': return self.cache_dict['compress']
         return Warning(f'No render mode {self.render_mode} found. Return the waveform instead.\n \
                        Access Render.cache_dict[`waveform`] to get the waveform.')
-    
+
 
 class UniformRetrierver:
     def __init__(self):
