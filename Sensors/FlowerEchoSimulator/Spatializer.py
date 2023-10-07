@@ -366,15 +366,20 @@ class RenderBase:
 
 
 class Render(RenderBase):
-    def __init__(self, mode:AnyStr='compress', cache_dict:Dict=dict(),):
+    def __init__(self, mode:AnyStr='compress', cache_dict:Dict=dict(),
+                 retriever_kwargs:Dict=dict(),
+                 viewer_kwargs:Dict=dict(),
+                 compress_kwargs:Dict=dict(),
+                 cochlea_kwargs:Dict=dict(),
+                 ):
         super().__init__(cache_dict=cache_dict)
         if mode not in ['compress', 'envelope', 'waveform']: 
             raise ValueError('mode must be one of compress, envelope, or waveform')
         self.render_mode = mode
-        self.fetch = OrientationalRetriever()
-        self.viewer = Viewer.FieldOfView()
-        self.compression_filter = Compressing.Subsample()
-        self.cochlea_filter = Cochlea.CochleaFilter()
+        self.fetch = OrientationalRetriever(**retriever_kwargs)
+        self.viewer = Viewer.FieldOfView(**viewer_kwargs)
+        self.compression_filter = Compressing.Subsample(**compress_kwargs)
+        self.cochlea_filter = Cochlea.CochleaFilter(**cochlea_kwargs)
 
     def run(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike,):
         if type(cartesian_objects_matrix)==list: cartesian_objects_matrix = np.asarray(cartesian_objects_matrix).reshape(-1,4)

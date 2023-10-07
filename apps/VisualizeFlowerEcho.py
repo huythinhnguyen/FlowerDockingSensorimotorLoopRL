@@ -90,10 +90,12 @@ def utest_render_2():
 
     def update(val):
         bat_pose = np.zeros(3).astype(float)
-        bat_pose[2] = Spatializer.wrapToPi(np.radians(sbatorient.val) + init_bat_orientation)
+        bat_pose[2] = Spatializer.wrapToPi(init_bat_orientation- np.radians(sbatorient.val) )
         cartesian_objects_matrix[0,1] = sdistance.val
-        cartesian_objects_matrix[0,2] = Spatializer.wrapToPi(np.radians(sflowerorient.val) + init_flower_orientation)
+        cartesian_objects_matrix[0,2] = Spatializer.wrapToPi(init_flower_orientation - np.radians(sflowerorient.val))
         render.run(bat_pose, cartesian_objects_matrix)
+        #print('bat_theta', np.degrees(render.viewer.filtered_objects_inview_polar[0,1]))
+        #print('flower_theta', np.degrees(render.viewer.filtered_objects_inview_polar[0,2]))
         if render.viewer.collision_status==True:
             bat_arrow.set_color('r')
             bat_pose = np.copy(render.viewer.bat_pose)
