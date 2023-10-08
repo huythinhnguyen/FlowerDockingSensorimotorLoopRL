@@ -389,6 +389,12 @@ class Render(RenderBase):
         echo_snippets_left, echo_snippets_right = self.fetch.get_echo_snippets(polar_objects_matrix)
         emission_left, emission_right = self.fetch.get_emission_snippet()
         noise_left, noise_right = self.fetch.get_noise_sample()
+        # at least one inf in the echo_snippets left or echo_snippets_right
+        if np.any(np.isinf(echo_snippets_left)) or np.any(np.isinf(echo_snippets_right)):
+            print('Warning: inf in echo_snippets_left or echo_snippets_right')
+            print('dis: {:.2f}, azi: {:.2f}, ori: {:.2f}'.format(polar_objects_matrix[:,0],
+                                                                 np.degrees(polar_objects_matrix[:,1]),
+                                                                 np.degrees(polar_objects_matrix[:,2])))
         self.cache_dict['snippet'] = {'left': echo_snippets_left, 'right': echo_snippets_right}
         self.cache_dict['waveform'] = {'left': (np.sum(echo_snippets_left, axis=0) + emission_left + noise_left).reshape(DATA_LENGTH,),
                                        'right':(np.sum(echo_snippets_right, axis=0) + emission_right + noise_right).reshape(DATA_LENGTH,)
