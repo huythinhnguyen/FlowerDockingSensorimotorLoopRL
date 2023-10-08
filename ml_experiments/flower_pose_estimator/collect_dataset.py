@@ -56,8 +56,10 @@ def generate_dataset(process_id, number_of_datapoints, distance_range, outputs_d
         outputs_dict['orientation'].append(orientation)
         outputs_dict['compress_left'].append(render.compress_left)
         outputs_dict['compress_right'].append(render.compress_right)
+        if i%1000 == 0:
+            logging.debug('Process {} finished {}/{} points'.format(process_id, i, number_of_datapoints))
 
-    return print('Process {} finished.'.format(process_id))
+    return logging.debug('Process {} finished.'.format(process_id))
 
 def generate_dataset_multiprocess(number_of_datapoints, number_of_processes):
     manager = mp.Manager()

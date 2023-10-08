@@ -104,16 +104,22 @@ class OrientationalRetriever:
         # find index of the first non-zero and the last non-zero of the snippet
         start_index = np.argmax(snippet != 0)
         end_index = snippet.shape[0] - np.argmax(snippet[::-1] != 0) - 1
-        from_dist_array = np.arange(start_index, end_index+1) \
-            * 0.5 * (1/AcousticSetting.SAMPLE_FREQ) * AcousticSetting.SPEED_OF_SOUND
 
         orignal_distance_index = np.searchsorted(DISTANCE_ENCODING, original_distance, side='right') - 1
         target_distance_index = np.searchsorted(DISTANCE_ENCODING, target_distance, side='right') - 1
         diff_index = target_distance_index - orignal_distance_index
+
+        # This is to catch the case of negative and zeros values in the to_dist_array.
+        if start_index+diff_index <0: start_index = 1 - diff_index
+
+        from_dist_array = np.arange(start_index, end_index+1) \
+            * 0.5 * (1/AcousticSetting.SAMPLE_FREQ) * AcousticSetting.SPEED_OF_SOUND
+
         to_dist_array = np.arange(start_index+diff_index,end_index+diff_index+1) \
             * 0.5 * (1/AcousticSetting.SAMPLE_FREQ) * AcousticSetting.SPEED_OF_SOUND
 
         atmospheric = np.power(10, AcousticSetting.AIR_ABSORPTION*2*(original_distance - target_distance)/20)
+        
         spreading = np.divide(from_dist_array , to_dist_array) \
             ** (AcousticSetting.OUTWARD_SPREAD + AcousticSetting.INWARD_SPREAD)
         attenuation = atmospheric * spreading
@@ -391,13 +397,6 @@ class Render(RenderBase):
         echo_snippets_left, echo_snippets_right = self.fetch.get_echo_snippets(polar_objects_matrix)
         emission_left, emission_right = self.fetch.get_emission_snippet()
         noise_left, noise_right = self.fetch.get_noise_sample()
-        # at least one inf in the echo_snippets left or echo_snippets_right
-        if np.any(np.isinf(echo_snippets_left)) or np.any(np.isinf(echo_snippets_right)) \
-            or np.any(np.isnan(echo_snippets_left)) or np.any(np.isnan(echo_snippets_right)):
-            logging.debug('Warning: inf in echo_snippets_left or echo_snippets_right')
-            logging.debug('dis: {:.2f}, azi: {:.2f}, ori: {:.2f}'.format(polar_objects_matrix[0,0],
-                                                                 np.degrees(polar_objects_matrix[0,1]),
-                                                                 np.degrees(polar_objects_matrix[0,2])))
         self.cache_dict['snippet'] = {'left': echo_snippets_left, 'right': echo_snippets_right}
         self.cache_dict['waveform'] = {'left': (np.sum(echo_snippets_left, axis=0) + emission_left + noise_left).reshape(DATA_LENGTH,),
                                        'right':(np.sum(echo_snippets_right, axis=0) + emission_right + noise_right).reshape(DATA_LENGTH,)
