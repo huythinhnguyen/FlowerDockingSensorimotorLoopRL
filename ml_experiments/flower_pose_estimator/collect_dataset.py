@@ -4,7 +4,7 @@ import multiprocessing as mp
 import numpy as np
 import time
 import pandas as pd
-
+import logging
 REPO_NAME = 'FlowerDockingSensorimotorLoopRL'
 REPO_PATH = os.path.abspath(__file__)
 while os.path.basename(REPO_PATH) != REPO_NAME: REPO_PATH = os.path.dirname(REPO_PATH)
@@ -99,7 +99,7 @@ def collect_and_save():
     date = time.strftime('%m%d%y')
     df.to_pickle(os.path.join(DATASET_DIR, 'dataset_{}.pkl'.format(date)))
 
-    print('Elapsed time: {} hours'.format((time.time() - tic) / 3600))
+    logging.info('Elapsed time: {} hours'.format((time.time() - tic) / 3600))
 
 
 def main():
@@ -107,4 +107,5 @@ def main():
     return collect_and_save()
 
 if __name__ == '__main__':
+    logging.basicConfig(filename='logging{}.txt'.format(time.strftime('%m%d%y')), encoding='utf-8', level=logging.DEBUG)
     main()
