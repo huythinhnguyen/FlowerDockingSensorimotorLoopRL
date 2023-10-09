@@ -13,7 +13,7 @@ if REPO_PATH not in sys.path: sys.path.append(REPO_PATH)
 from Sensors.FlowerEchoSimulator import Spatializer
 from Sensors.FlowerEchoSimulator.Setting import *
 
-DATASET_DIR = os.path.join(REPO_PATH, 'ml_experiments/dataset/flower_pose_estimator')
+DATASET_DIR = os.path.join(REPO_PATH, 'ml_experiments/datasets/flower_pose_estimator')
 
 ###
 # Dataset generation
@@ -27,14 +27,16 @@ DATASET_DIR = os.path.join(REPO_PATH, 'ml_experiments/dataset/flower_pose_estima
 # Data will be collected from NUMBER_OF_DATAPOINTS / 16
 ###
 DISTANCE_RANGE = (0.2, 3.2)
-AZIMUTH_RANGE = (-100., 100.)
+AZIMUTH_RANGE = (-110., 110.)
 ORIENTATION_RANGE = (-180., 180.)
 
-N_SAMPLES = 50_000*os.cpu_count()
+NUMBER_OF_SKIP_CPU = 0
+
+N_SAMPLES = 7_000*(os.cpu_count() - NUMBER_OF_SKIP_CPU)
 
 NUMBER_OF_STAIRS = 4
 
-COARSE_N = int(os.cpu_count() / NUMBER_OF_STAIRS)
+COARSE_N = int((os.cpu_count() - NUMBER_OF_SKIP_CPU) / NUMBER_OF_STAIRS)
 
 def generate_dataset(process_id, number_of_datapoints, distance_range, outputs_dict):
     init_bat_theta = np.radians(90)
@@ -54,53 +56,64 @@ def generate_dataset(process_id, number_of_datapoints, distance_range, outputs_d
         outputs_dict['distance'].append(distance)
         outputs_dict['azimuth'].append(azimuth)
         outputs_dict['orientation'].append(orientation)
+        outputs_dict['envelope_left'].append(render.envelope_left)
+        outputs_dict['envelope_right'].append(render.envelope_right)
         outputs_dict['compress_left'].append(render.compress_left)
         outputs_dict['compress_right'].append(render.compress_right)
         if i%1000 == 0:
             logging.debug('Process {} finished {}/{} points'.format(process_id, i, number_of_datapoints))
-
     return logging.debug('Process {} finished.'.format(process_id))
 
 def generate_dataset_multiprocess(number_of_datapoints, number_of_processes):
+    outputs_dict_ls = []
     manager = mp.Manager()
-    outputs_dict = manager.dict()
-    outputs_dict['distance'] = manager.list()
-    outputs_dict['azimuth'] = manager.list()
-    outputs_dict['orientation'] = manager.list()
-    outputs_dict['compress_left'] = manager.list()
-    outputs_dict['compress_right'] = manager.list()
-
     processes = []
     for i in range(number_of_processes):
+        outputs_dict_ls.append(manager.dict(distance = manager.list(),
+                                            azimuth = manager.list(),
+                                            orientation = manager.list(),
+                                            envelope_left = manager.list(),
+                                            envelope_right = manager.list(),
+                                            compress_left = manager.list(),
+                                            compress_right = manager.list()))
+
         distance_range = (DISTANCE_RANGE[0], DISTANCE_RANGE[0] + (int(i/COARSE_N)+1) \
                           * (DISTANCE_RANGE[1] - DISTANCE_RANGE[0]) / (number_of_processes/COARSE_N) )
-        p = mp.Process(target=generate_dataset, args=(i, number_of_datapoints, distance_range, outputs_dict))
+        p = mp.Process(target=generate_dataset, args=(i, number_of_datapoints, distance_range, outputs_dict_ls[i]))
         processes.append(p)
         p.start()
     for p in processes:
         p.join()
 
-    outputs_dict['distance'] = np.asarray(outputs_dict['distance'])
-    outputs_dict['azimuth'] = np.asarray(outputs_dict['azimuth'])
-    outputs_dict['orientation'] = np.asarray(outputs_dict['orientation'])
-    outputs_dict['compress_left'] = np.asarray(outputs_dict['compress_left'])
-    outputs_dict['compress_right'] = np.asarray(outputs_dict['compress_right'])
-
-    return outputs_dict
+    return outputs_dict_ls
 
 def collect_and_save():
+    logging.info('===============================\nCollecting dataset...')
     if not os.path.exists(DATASET_DIR):
         os.makedirs(DATASET_DIR)
     tic = time.time()
-    number_of_processes = os.cpu_count()
+    number_of_processes = os.cpu_count() - NUMBER_OF_SKIP_CPU
     number_of_datapoints = int(N_SAMPLES / number_of_processes)
-    outputs_dict = generate_dataset_multiprocess(number_of_datapoints, number_of_processes)
-    df = pd.DataFrame(outputs_dict)
+    outputs_dict_ls = generate_dataset_multiprocess(number_of_datapoints, number_of_processes)
     
+    final_outputs = dict(distance = [],
+                         azimuth = [],
+                         orientation = [],
+                         envelope_left = [],
+                         envelope_right = [],
+                         compress_left = [],
+                         compress_right = [])
+    for i, outputs in enumerate(outputs_dict_ls):
+        for key in outputs.keys():
+            final_outputs[key] += outputs[key]
+
+    df = pd.DataFrame.from_dict(final_outputs)
+
     # save to pickle with date MMDDYY format
     date = time.strftime('%m%d%y')
+    
     df.to_pickle(os.path.join(DATASET_DIR, 'dataset_{}.pkl'.format(date)))
-
+    
     logging.info('Elapsed time: {} hours'.format((time.time() - tic) / 3600))
 
 
@@ -109,5 +122,5 @@ def main():
     return collect_and_save()
 
 if __name__ == '__main__':
-    logging.basicConfig(filename='logging{}.txt'.format(time.strftime('%m%d%y')), encoding='utf-8', level=logging.DEBUG)
+    logging.basicConfig(filename='log.txt', encoding='utf-8', level=logging.DEBUG)
     main()
