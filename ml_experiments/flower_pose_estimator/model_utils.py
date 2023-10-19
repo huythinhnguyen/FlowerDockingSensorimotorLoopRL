@@ -174,7 +174,7 @@ class UniEchoVGG_PoseEstimator(nn.Module):
                 dropout_rate=0.05):
         super(UniEchoVGG_PoseEstimator, self).__init__()
         self.backbone, input_echo_length = make_echo_vgg_backbone(input_echo_length, kernel_sizes, output_channels, strides, paddings, repeat_convs,
-                                                                  batch_norm=batch_norm,maxpool_kernel_sizes=maxpool_kernel_sizes, endpooling=endpooling, input_channel=1)
+                                                                  batch_norm=batch_norm,maxpool_kernel_sizes=maxpool_kernel_sizes, endpooling=endpooling, input_channel=2)
         if mixing_layer_units:
             self.mixing_layer = nn.Sequential(nn.Linear(input_echo_length*output_channels[-1], mixing_layer_units), nn.ReLU())
             input_echo_length = mixing_layer_units
