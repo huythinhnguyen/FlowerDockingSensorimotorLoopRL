@@ -159,9 +159,9 @@ class EchoVGG_PoseEstimator(nn.Module):
 class UniEchoVGG_PoseEstimator(nn.Module):
     def __init__(self, input_echo_length,
                  kernel_sizes = (7,7,5,5,3,3),
-                output_channels = (16,32,64,64,64,64),
+                output_channels = (16,32,64,128,128,128),
                 strides = (1,1,1,1,1,1),
-                paddings = (3,3,2,2,1,1),
+                paddings = (3,2,2,2,1,1),
                 repeat_convs = (2,2,3,3,4,4),
                 maxpool_kernel_sizes = (8,8,4,4,3,3),
                 endpooling = 'maxpool',
@@ -170,7 +170,7 @@ class UniEchoVGG_PoseEstimator(nn.Module):
                 azimuth_hidden_layers = (512,128),
                 orientation_hidden_layers = (512,128),
                 batch_norm=True,
-                dropout=False,
+                dropout=True,
                 dropout_rate=0.05):
         super(UniEchoVGG_PoseEstimator, self).__init__()
         self.backbone, input_echo_length = make_echo_vgg_backbone(input_echo_length, kernel_sizes, output_channels, strides, paddings, repeat_convs,
@@ -190,4 +190,37 @@ class UniEchoVGG_PoseEstimator(nn.Module):
         azimuth = self.azimuth_head(x)
         orientation = self.orientation_head(x)
         return distance, azimuth, orientation
+
+
+class StandardScaler:
+
+    def __init__(self, mean=None, std=None, epsilon=1e-7):
+        """Standard Scaler.
+        The class can be used to normalize PyTorch Tensors using native functions. The module does not expect the
+        tensors to be of any specific shape; as long as the features are the last dimension in the tensor, the module
+        will work fine.
+        :param mean: The mean of the features. The property will be set after a call to fit.
+        :param std: The standard deviation of the features. The property will be set after a call to fit.
+        :param epsilon: Used to avoid a Division-By-Zero exception.
+        """
+        self.mean = mean
+        self.std = std
+        self.epsilon = epsilon
+
+    def fit(self, values):
+        dims = list(range(values.dim() - 1))
+        self.mean = torch.mean(values, dim=dims)
+        self.std = torch.std(values, dim=dims)
+
+    def transform(self, values):
+        return (values - self.mean) / (self.std + self.epsilon)
+
+    def fit_transform(self, values):
+        self.fit(values)
+        return self.transform(values)
     
+    def inverse_transform(self, values):
+        for t, m, s in zip(values, self.mean, self.std):
+            t.mul_(s).add_(m)
+            # The normalize code -> t.sub_(m).div_(s)
+        return values
