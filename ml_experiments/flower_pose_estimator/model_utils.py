@@ -192,35 +192,78 @@ class UniEchoVGG_PoseEstimator(nn.Module):
         return distance, azimuth, orientation
 
 
-class StandardScaler:
+class UniEchoVGG_PoseEstimatorXYEncoding(nn.Module):
+    def __init__(self, input_echo_length,
+                 kernel_sizes = (7,7,5,5,3,3),
+                output_channels = (16,32,64,128,128,128),
+                strides = (1,1,1,1,1,1),
+                paddings = (3,2,2,2,1,1),
+                repeat_convs = (2,2,3,3,4,4),
+                maxpool_kernel_sizes = (8,8,4,4,3,3),
+                endpooling = 'maxpool',
+                mixing_layer_units = None,
+                distance_hidden_layers = (512,128),
+                azimuth_hidden_layers = (512,128),
+                orientation_hidden_layers = (512,128),
+                batch_norm=True,
+                dropout=False,
+                dropout_rate=0.05):
+        super(UniEchoVGG_PoseEstimatorXYEncoding, self).__init__()
+        self.backbone, input_echo_length = make_echo_vgg_backbone(input_echo_length, kernel_sizes, output_channels, strides, paddings, repeat_convs,
+                                                                  batch_norm=batch_norm,maxpool_kernel_sizes=maxpool_kernel_sizes, endpooling=endpooling, input_channel=2)
+        if mixing_layer_units:
+            self.mixing_layer = nn.Sequential(nn.Linear(input_echo_length*output_channels[-1], mixing_layer_units), nn.ReLU())
+            input_echo_length = mixing_layer_units
+        self.distance_head = make_fc_regression_head(input_units=input_echo_length*output_channels[-1], hidden_layers=distance_hidden_layers, output_units=1, dropout=dropout, dropout_rate=dropout_rate)
+        self.azimuth_head = make_fc_regression_head(input_units=input_echo_length*output_channels[-1], hidden_layers=azimuth_hidden_layers, output_units=1, dropout=dropout, dropout_rate=dropout_rate)
+        self.orientation_head = make_fc_regression_head(input_units=input_echo_length*output_channels[-1], hidden_layers=orientation_hidden_layers, output_units=2, dropout=dropout, dropout_rate=dropout_rate)
 
-    def __init__(self, mean=None, std=None, epsilon=1e-7):
-        """Standard Scaler.
-        The class can be used to normalize PyTorch Tensors using native functions. The module does not expect the
-        tensors to be of any specific shape; as long as the features are the last dimension in the tensor, the module
-        will work fine.
-        :param mean: The mean of the features. The property will be set after a call to fit.
-        :param std: The standard deviation of the features. The property will be set after a call to fit.
-        :param epsilon: Used to avoid a Division-By-Zero exception.
-        """
-        self.mean = mean
-        self.std = std
-        self.epsilon = epsilon
+    def forward(self, x):
+        x = self.backbone(x)
+        x = x.reshape(x.size(0), -1)
+        if hasattr(self, 'mixing_layer'): x = self.mixing_layer(x)
+        distance = self.distance_head(x)
+        azimuth = self.azimuth_head(x)
+        orientation = self.orientation_head(x)
+        return distance, azimuth, orientation
 
-    def fit(self, values):
-        dims = list(range(values.dim() - 1))
-        self.mean = torch.mean(values, dim=dims)
-        self.std = torch.std(values, dim=dims)
 
-    def transform(self, values):
-        return (values - self.mean) / (self.std + self.epsilon)
+class UniEchVGG_GradCAM_Pretrained(nn.Module):
+    def __init__(self, saved_model_path, orientation_encoding=None, **kwargs):
+        super(UniEchVGG_GradCAM_Pretrained, self).__init__()
+        if orientation_encoding=='xy':
+            echo_vgg = UniEchoVGG_PoseEstimatorXYEncoding(input_echo_length=512, **kwargs)
+        else:
+            echo_vgg = UniEchoVGG_PoseEstimator(input_echo_length=512, **kwargs)
+        echo_vgg.load_state_dict(torch.load(saved_model_path), strict=False)
 
-    def fit_transform(self, values):
-        self.fit(values)
-        return self.transform(values)
+        self.features = nn.Sequential()
+        for i, block in enumerate(echo_vgg.backbone):
+            if i < len(echo_vgg.backbone) - 1:
+                self.features += block
+            else: self.features += block[:-1]
+        self.maxpool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False)
+        self.distance_head = echo_vgg.distance_head
+        self.azimuth_head = echo_vgg.azimuth_head
+        self.orientation_head = echo_vgg.orientation_head
+
+        self.gradients = None
+
+    def activations_hook(self, grad):
+        self.gradients = grad
+
+    def forward(self, x):
+        x = self.features(x)
+        x.register_hook(self.activations_hook)
+        x = self.maxpool(x)
+        x = x.reshape(x.size(0), -1)
+        distance = self.distance_head(x)
+        azimuth = self.azimuth_head(x)
+        orientation = self.orientation_head(x)
+        return distance, azimuth, orientation
+
+    def get_activations_gradient(self):
+        return self.gradients
     
-    def inverse_transform(self, values):
-        for t, m, s in zip(values, self.mean, self.std):
-            t.mul_(s).add_(m)
-            # The normalize code -> t.sub_(m).div_(s)
-        return values
+    def get_activations(self, x):
+        return self.features(x)
