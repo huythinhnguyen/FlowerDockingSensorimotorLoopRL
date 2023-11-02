@@ -17,7 +17,7 @@ class LogDecayProfilePresenceDector(PerceptionBase):
         self.transform_input = transform_input
 
     def run(self, x):
-        self._check_input(x)
+        self._check_input_shape(x)
         if self.transform_input: inputs = self.transform(x)
         left_score = np.sum(np.maximum(self.profile, self.transform(inputs[:,0,:])) - self.profile) / len(inputs)
         right_score = np.sum(np.maximum(self.profile, self.transform(inputs[:,1,:])) - self.profile) / len(inputs)
@@ -36,7 +36,3 @@ class LogDecayProfilePresenceDector(PerceptionBase):
 
     def get_presence_score(self):
         return self.score
-    
-    def _check_input(sefl, x):
-        if x.shape[1] != 2 or len(x.shape) != 3:
-            raise ValueError('Input shape must be (batch, 2, time) but got {}'.format(x.shape))

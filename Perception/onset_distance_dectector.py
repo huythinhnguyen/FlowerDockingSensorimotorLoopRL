@@ -15,19 +15,15 @@ class ClosestPeakDistance(PerceptionBase):
         self.compressed_distance = TransformConfig.DISTANCE_ENCODING
         self.transform_input = transform_input
         
-    def run(self, x):
-        self._check_input(x)
+    def run(self, x, ouput_index=False):
+        self._check_single_input(x)
         if self.transform_input: inputs = self.transform(x)
-        left_peaks, _ = find_peaks(self.transform(x[0, 0, :]).numpy(), distance= int(TransformConfig.ENVELOPE_LENGTH/16), prominence=0.01, height=self.profile)
-        right_peaks, _ = find_peaks(self.transform(x[0,1,:]).numpy(), distance= int(TransformConfig.ENVELOPE_LENGTH/16), prominence=0.01, height=self.profile)
-        self.closest_peak_idx = min([left_peaks[np.argmax(self.transform(inputs[0,0,:]).numpy()[ left_peaks])],
-                      left_peaks[np.argmax(self.transform(inputs[0,1,:]).numpy()[ right_peaks ])]])
-        
+        left_peaks, _ = find_peaks(self.transform(x[0, 0, :]), distance= int(TransformConfig.ENVELOPE_LENGTH/16), prominence=0.01, height=self.profile)
+        right_peaks, _ = find_peaks(self.transform(x[0,1,:]), distance= int(TransformConfig.ENVELOPE_LENGTH/16), prominence=0.01, height=self.profile)
+        candidates = []
+        if len(left_peaks) == 0 and len(right_peaks) == 0: return None
+        if len(left_peaks) > 0 : candidates.append(left_peaks[np.argmax(self.transform(inputs[0,0,:])[ left_peaks])])
+        if len(right_peaks) > 0 : candidates.append(right_peaks[np.argmax(self.transform(inputs[0,1,:])[ right_peaks ])])
+        self.closest_peak_idx = min(candidates)
+        if ouput_index: return self.closest_peak_idx
         return self.compressed_distance[self.closest_peak_idx]
-
-
-    def _check_input(sefl, x):
-        if len(x) !=1:
-            raise ValueError('Input must be a single batch but got {}'.format(len(x)))
-        if x.shape[1] != 2 or len(x.shape) != 3:
-            raise ValueError('Input shape must be (batch, 2, time) but got {}'.format(x.shape))

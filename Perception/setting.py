@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike
 
-
+import Perception
 
 from Sensors.FlowerEchoSimulator.Spatializer import Compressing, SeriesEncoding
 
@@ -21,7 +21,9 @@ class TransformConfig:
 @dataclass
 class LogDecayProfile:
     EMISSION_PEAK_ENCODED_INDEX: float = 0.026
-    EMISSION_PEAK_INDEX: int = int( 0.026 * TransformConfig.ENVELOPE_LENGTH )
+    EMISSION_WIDTH_ENCODED_INDEX: float = 0.12
+    EMISSION_PEAK_INDEX: int = int( EMISSION_PEAK_ENCODED_INDEX * TransformConfig.ENVELOPE_LENGTH )
+    EMISSION_WIDTH_INDEX: int = int( EMISSION_WIDTH_ENCODED_INDEX * TransformConfig.ENVELOPE_LENGTH )
     PLATEAU_LENGTH: int = EMISSION_PEAK_INDEX + int(TransformConfig.ENVELOPE_LENGTH / 256) + 1
     NORMALIZED_NOISE_LEVEL: float = 0.03 # from 0 to 1
     DECAY_RATE: int = 30 # Higher to hug the envelope stricter (faster decay)
@@ -34,3 +36,9 @@ class PresenceDetectorConfig:
     DETECTION_THRESHOLD: float = 4.
     GAIN: float = 1. # Multiplier for presence score prior to applying detection threshold
     SCORE_MODE = 'sum' # 'sum' or 'max'
+
+
+@dataclass
+class ImportantPath:
+    REPO_PATH = Perception.REPO_PATH
+    POSE_ESTIMATOR_MODEL = os.path.join(REPO_PATH, 'saved_models', 'flower_pose_estimator_v1.pt')
