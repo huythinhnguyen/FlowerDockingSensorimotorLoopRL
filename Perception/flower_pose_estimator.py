@@ -60,6 +60,18 @@ def zero_outside_of_wave_package(x: ArrayLike, left_wave_package_boundaries: Tup
         x_cleanup[:,:,emission_width_index:left] = 0
     return x_cleanup
 
+def find_first_zero_from_index(x: ArrayLike, index: int) -> int:
+    if np.all(x != 0):
+        raise ValueError('Input must be quieted but no zero was found')
+    if len(x.shape) > 1:
+        raise ValueError('Input must be a rank-1 array but got shape {}'.format(x.shape))
+    if index < 0 or index >= len(x):
+        raise ValueError('Index must be within the range of input but got {}'.format(index))
+    if x[index] == 0: return index
+    right = np.where(x[index+1:] == 0)[0] + index + 1
+    right_index = right[0] if right.size > 0 else index
+    return right_index
+        
 
 def find_idx_from_distance_array(distance: float, compressed_distance: ArrayLike) -> int:
     return np.argmin(np.abs(compressed_distance - distance))
@@ -174,17 +186,29 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
 
     
     def clean_up_input_for_second_shot(self, x, pred_distance, onset_distance, compressed_distances):
-        left_wpb_onset = find_wave_package_of_given_index(self.transform(x[0,0,:]), self.onset_distance_detector.closest_peak_idx)
-        right_wpb_onset = find_wave_package_of_given_index(self.transform(x[0,1,:]), self.onset_distance_detector.closest_peak_idx)
+        new_x = self.transform(x)
+        left_wpb_onset = find_wave_package_of_given_index(new_x[0,0,:], self.onset_distance_detector.closest_peak_idx)
+        right_wpb_onset = find_wave_package_of_given_index(new_x[0,1,:], self.onset_distance_detector.closest_peak_idx)
         pred_distance_idx =  find_idx_from_distance_array(pred_distance, compressed_distances)
-        left_wpb_predicted = find_wave_package_of_given_index(self.transform(x[0,0,:]), pred_distance_idx)
-        right_wpb_predicted = find_wave_package_of_given_index(self.transform(x[0,1,:]), pred_distance_idx)
+        left_wpb_predicted = find_wave_package_of_given_index(new_x[0,0,:], pred_distance_idx)
+        right_wpb_predicted = find_wave_package_of_given_index(new_x[0,1,:], pred_distance_idx)
         # scenario 1: onset distance is approximately equal to predicted distance
         # scenario 3: onset distance is smaller than predicted distance
         if ( left_wpb_onset == left_wpb_predicted ) or ( right_wpb_onset == right_wpb_predicted ) or (onset_distance < pred_distance):
             return zero_outside_of_wave_package(self.transform(x), left_wpb_onset, right_wpb_onset, self.emission_width_index)
         # scenario 2: onset distance is larger than predicted distance
+        # zeros out all the wave package from the predicted distance. 
+        # --> Need to make sure that Im not cutting in the current wave package that the predicted distance is in.
+        # then repeat the steps in OnsetOneshotFlowerPoseEstimator (calc onset_distance, find left and right wave package boundaries, zero out all wave package except for emission)
+        ##################################################
         
+        pred_distance_idx =  max([find_first_zero_from_index(new_x[0,0,:], pred_distance_idx), find_first_zero_from_index(new_x[0,1,:], pred_distance_idx)] )
+        new_x = x.copy()
+        new_x[:,:,pred_distance_idx:] = 0
+        onset_distance_idx = self.onset_distance_detector(new_x, ouput_index=True)
+        left_wpb = find_wave_package_of_given_index(self.transform(new_x[0,0,:]), onset_distance_idx)
+        right_wpb = find_wave_package_of_given_index(self.transform(new_x[0,1,:]), onset_distance_idx)
+        return zero_outside_of_wave_package(self.transform(x), left_wpb, right_wpb, self.emission_width_index)
 
 
     def run(self, x):
@@ -197,19 +221,20 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         # First shot
         ############################################################
         inputs = self.transform(x)
-        d_pred, a_pred, o_pred = self.model(inputs)
-        distance = d_pred.item()
-        azimuth = a_pred.item()
-        orientation = o_pred.item()
+        pred = self.model(inputs)
+        distance = pred[0].item()
         ###### SOME CODE HERE ######
         # Checking the results of the first shot
         # Clean up the input x to remove interfering objects.
         # Do the second shot.
         onset_distance = self.onset_distance_detector(x)
-        # wpb = wave package boundaries
-        
-
+        x_clean = self.clean_up_input_for_second_shot(x, pred_distance=distance, onset_distance=onset_distance, compressed_distances=self.compressed_distances)
         ############################################################
         # Second shot
         ############################################################
-         
+        inputs = torch.from_numpy(x_clean).float()
+        d_pred, a_pred, o_pred = self.model(inputs)
+        distance = d_pred.item()
+        azimuth = a_pred.item()
+        orientation = o_pred.item()
+        return distance, azimuth, orientation
