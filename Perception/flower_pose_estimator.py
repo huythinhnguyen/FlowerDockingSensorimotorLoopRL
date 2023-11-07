@@ -89,26 +89,31 @@ def find_idx_from_distance_array(distance: float, compressed_distance: ArrayLike
 #   - Very accurate when there is only one single flower present in the input
 #   - Inaccurate when there are multiple flowers present in the input (that's why it's naive)
 class NaiveOneShotFlowerPoseEstimator(PerceptionBase):
-    def __init__(self, to_tensor:bool=True, check_presence:bool=True):
-        super(NaiveOneShotFlowerPoseEstimator).__init__(to_tensor)
+    def __init__(self, to_tensor:bool=True, check_presence:bool=True, cache_inputs:bool=False):
+        super(NaiveOneShotFlowerPoseEstimator, self).__init__(to_tensor)
         self.presence_detector = LogDecayProfilePresenceDector()
-        self.model = UniEchoVGG_PoseEstimator(dropout=False)
-        self.model.load_state_dict(torch.load(SAVED_MODEL_PATH))
+        self.model = UniEchoVGG_PoseEstimator(input_echo_length=TransformConfig.ENVELOPE_LENGTH, dropout=False)
+        self.model.load_state_dict(torch.load(SAVED_MODEL_PATH, map_location=self.device))
         self.model.to(self.device)
         self.model.eval()
         self.check_presence = check_presence
+        self.cache = {}
+        self.cache_inputs = cache_inputs
 
     def run(self, x: ArrayLike) -> Tuple[float, float, float]:
         self._check_single_input(x)
         # check whether something is presence prior to pose estimation
-        if self.check_presence: 
+        if self.check_presence:
             if not self.presence_detector(x):
+                if self.cache_inputs: self.cache['inputs'] = np.zeros((1,2,TransformConfig.ENVELOPE_LENGTH))
                 return None, None, None
         inputs = self.transform(x)
         d_pred, a_pred, o_pred = self.model(inputs.to(self.device))
         distance = d_pred.item()
         azimuth = a_pred.item()
         orientation = o_pred.item()
+        if self.cache_inputs:
+            self.cache['inputs'] = inputs.numpy(force=True)
         return distance, azimuth, orientation
 
 
@@ -128,8 +133,8 @@ class NaiveOneShotFlowerPoseEstimator(PerceptionBase):
 #     Pose estimation will still be accurate, however, it will focus on the strongest signal instead of the closest signal.
 
 class OnsetOneShotFlowerPoseEstimator(PerceptionBase):
-    def __init__(self, to_tensor:bool=False, check_presence:bool=True):
-        super(OnsetOneShotFlowerPoseEstimator).__init__(to_tensor)
+    def __init__(self, to_tensor:bool=False, check_presence:bool=True, cache_inputs:bool=False):
+        super(OnsetOneShotFlowerPoseEstimator, self).__init__(to_tensor)
         self.presence_detector = LogDecayProfilePresenceDector()
         self.onset_distance_detector = ClosestPeakDistance()
         self.model = UniEchoVGG_PoseEstimator(dropout=False)
@@ -139,6 +144,8 @@ class OnsetOneShotFlowerPoseEstimator(PerceptionBase):
         self.check_presence = check_presence
         self.emission_width_index = LogDecayProfile.EMISSION_WIDTH_INDEX
         self.compressed_distance = TransformConfig.DISTANCE_ENCODING
+        self.cache = {}
+        self.cache_inputs = cache_inputs
 
     def run(self, x: ArrayLike) -> Tuple[float, float, float]:
         self._check_single_input(x)
@@ -155,6 +162,8 @@ class OnsetOneShotFlowerPoseEstimator(PerceptionBase):
         distance = d_pred.item()
         azimuth = a_pred.item()
         orientation = o_pred.item()
+        if self.cache_inputs:
+            self.cache['inputs'] = inputs.numpy(force=True)
         return distance, azimuth, orientation
 
 
@@ -173,8 +182,8 @@ class OnsetOneShotFlowerPoseEstimator(PerceptionBase):
 #      + Second, predicted distance and onset distance will be ranked.
 #         
 class TwoShotFlowerPoseEstimator(PerceptionBase):
-    def __init__(self, to_tensor=False, check_presence=True):
-        super(TwoShotFlowerPoseEstimator).__init__(to_tensor)
+    def __init__(self, to_tensor=False, check_presence=True, cache_inputs=False):
+        super(TwoShotFlowerPoseEstimator, self).__init__(to_tensor)
         self.onset_distance_detector = ClosestPeakDistance()
         self.presence_detector = LogDecayProfilePresenceDector()
         self.model = UniEchoVGG_PoseEstimator(dropout=False)
@@ -183,6 +192,8 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         self.check_presence = check_presence
         self.emission_width_index = LogDecayProfile.EMISSION_WIDTH_INDEX
         self.compressed_distances = TransformConfig.DISTANCE_ENCODING
+        self.cache = {}
+        self.cache_inputs = cache_inputs
 
     
     def clean_up_input_for_second_shot(self, x, pred_distance, onset_distance, compressed_distances):
@@ -237,4 +248,7 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         distance = d_pred.item()
         azimuth = a_pred.item()
         orientation = o_pred.item()
+
+        if self.cache_inputs:
+            self.cache['inputs'] = inputs.numpy(force=True)
         return distance, azimuth, orientation

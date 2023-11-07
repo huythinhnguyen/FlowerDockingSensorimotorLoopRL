@@ -13,14 +13,15 @@ class LogDecayProfilePresenceDector(PerceptionBase):
         self.profile = LogDecayProfile.PROFILE
         self.detection_threshold = PresenceDetectorConfig.DETECTION_THRESHOLD
         self.gain = PresenceDetectorConfig.GAIN
-        self.score_mode = PresenceDetectorConfig.SCORE_MOD
+        self.score_mode = PresenceDetectorConfig.SCORE_MODE
         self.transform_input = transform_input
 
     def run(self, x):
         self._check_input_shape(x)
         if self.transform_input: inputs = self.transform(x)
-        left_score = np.sum(np.maximum(self.profile, self.transform(inputs[:,0,:])) - self.profile) / len(inputs)
-        right_score = np.sum(np.maximum(self.profile, self.transform(inputs[:,1,:])) - self.profile) / len(inputs)
+        left_score = np.sum(np.maximum(self.profile, inputs[:,0,:]) - self.profile)
+        right_score = np.sum(np.maximum(self.profile, inputs[:,1,:]) - self.profile)
+
         if self.score_mode == 'sum':
             score = left_score + right_score
         elif self.score_mode == 'max':

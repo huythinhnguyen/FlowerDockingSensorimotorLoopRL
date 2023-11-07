@@ -8,7 +8,7 @@ QUIET_THRESHOLD = 0.15
 
 
 class PerceptionBase:
-    def __init__(self, to_tensor=False):
+    def __init__(self, to_tensor:bool=False):
         self.transform = get_transform(quiet_threshold=QUIET_THRESHOLD, 
                                        normalize_min_value=TransformConfig.NORMALIZE_MIN_VALUE, 
                                        normalize_max_value=TransformConfig.NORMALIZE_MAX_VALUE,
