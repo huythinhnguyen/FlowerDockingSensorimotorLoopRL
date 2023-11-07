@@ -15,7 +15,7 @@ SAVED_MODEL_PATH =  ImportantPath.POSE_ESTIMATOR_MODEL
 
 
 def find_wave_package_of_given_index(x: ArrayLike, index:int , min_width: int =None) -> Tuple[int, int]:
-    
+    if not index: return 0,0
     # if there's not zeros in x, raise error
     if np.all(x != 0):
         raise ValueError('Input must be quieted but no zero was found')
@@ -137,8 +137,8 @@ class OnsetOneShotFlowerPoseEstimator(PerceptionBase):
         super(OnsetOneShotFlowerPoseEstimator, self).__init__(to_tensor)
         self.presence_detector = LogDecayProfilePresenceDector()
         self.onset_distance_detector = ClosestPeakDistance()
-        self.model = UniEchoVGG_PoseEstimator(dropout=False)
-        self.model.load_state_dict(torch.load(SAVED_MODEL_PATH))
+        self.model = UniEchoVGG_PoseEstimator(input_echo_length=TransformConfig.ENVELOPE_LENGTH, dropout=False)
+        self.model.load_state_dict(torch.load(SAVED_MODEL_PATH, map_location=self.device))
         self.model.to(self.device)
         self.model.eval()
         self.check_presence = check_presence
@@ -163,6 +163,9 @@ class OnsetOneShotFlowerPoseEstimator(PerceptionBase):
         azimuth = a_pred.item()
         orientation = o_pred.item()
         if self.cache_inputs:
+            self.cache['onset_distance_idx'] = onset_distance_idx
+            self.cache['left_wave_package_boundaries'] = left_wave_package_boundaries
+            self.cache['right_wave_package_boundaries'] = right_wave_package_boundaries
             self.cache['inputs'] = inputs.numpy(force=True)
         return distance, azimuth, orientation
 
@@ -186,8 +189,9 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         super(TwoShotFlowerPoseEstimator, self).__init__(to_tensor)
         self.onset_distance_detector = ClosestPeakDistance()
         self.presence_detector = LogDecayProfilePresenceDector()
-        self.model = UniEchoVGG_PoseEstimator(dropout=False)
-        self.model.load_state_dict(torch.load(SAVED_MODEL_PATH))
+        self.model = UniEchoVGG_PoseEstimator(input_echo_length=TransformConfig.ENVELOPE_LENGTH, dropout=False)
+        self.model.load_state_dict(torch.load(SAVED_MODEL_PATH, map_location=self.device))
+        self.model.to(self.device)
         self.model.eval()
         self.check_presence = check_presence
         self.emission_width_index = LogDecayProfile.EMISSION_WIDTH_INDEX
@@ -201,6 +205,11 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         left_wpb_onset = find_wave_package_of_given_index(new_x[0,0,:], self.onset_distance_detector.closest_peak_idx)
         right_wpb_onset = find_wave_package_of_given_index(new_x[0,1,:], self.onset_distance_detector.closest_peak_idx)
         pred_distance_idx =  find_idx_from_distance_array(pred_distance, compressed_distances)
+        if self.cache_inputs:
+            self.cache['pred_distance_idx'] = pred_distance_idx
+            self.cache['final_pred_distance_idx'] = pred_distance_idx
+            self.cache['onset_distance_idx'] = self.onset_distance_detector.closest_peak_idx
+            self.cache['final_onset_distance_idx'] = self.onset_distance_detector.closest_peak_idx
         left_wpb_predicted = find_wave_package_of_given_index(new_x[0,0,:], pred_distance_idx)
         right_wpb_predicted = find_wave_package_of_given_index(new_x[0,1,:], pred_distance_idx)
         # scenario 1: onset distance is approximately equal to predicted distance
@@ -212,7 +221,6 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         # --> Need to make sure that Im not cutting in the current wave package that the predicted distance is in.
         # then repeat the steps in OnsetOneshotFlowerPoseEstimator (calc onset_distance, find left and right wave package boundaries, zero out all wave package except for emission)
         ##################################################
-        
         pred_distance_idx =  max([find_first_zero_from_index(new_x[0,0,:], pred_distance_idx), find_first_zero_from_index(new_x[0,1,:], pred_distance_idx)] )
         new_x = x.copy()
         new_x[:,:,pred_distance_idx:] = 0
@@ -231,8 +239,8 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         ############################################################
         # First shot
         ############################################################
-        inputs = self.transform(x)
-        pred = self.model(inputs)
+        inputs = torch.from_numpy(self.transform(x)).float()
+        pred = self.model(inputs.to(self.device))
         distance = pred[0].item()
         ###### SOME CODE HERE ######
         # Checking the results of the first shot
@@ -244,11 +252,13 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         # Second shot
         ############################################################
         inputs = torch.from_numpy(x_clean).float()
-        d_pred, a_pred, o_pred = self.model(inputs)
+        d_pred, a_pred, o_pred = self.model(inputs.to(self.device))
         distance = d_pred.item()
         azimuth = a_pred.item()
         orientation = o_pred.item()
 
         if self.cache_inputs:
             self.cache['inputs'] = inputs.numpy(force=True)
+            self.cache['final_pred_distance_idx'] = find_idx_from_distance_array(distance, self.compressed_distances)
+            self.cache['final_onset_distance_idx'] = self.onset_distance_detector.closest_peak_idx
         return distance, azimuth, orientation
