@@ -10,7 +10,7 @@ Basic features:
     o Make sure this is free of bug before moving on.
 Wish-list features:
     o Add 2 or more flower to the widgets.
-    : Allow user to select which estimator to use. --> Currently have to input from command line. --> Will implement on the fly switching next.
+    o Allow user to select which estimator to use.
     o Maybe allow user to move bat pose around also. -> bat's orientation is implemented
 """
 import sys
@@ -324,7 +324,8 @@ def utest_render_3():
     render = Spatializer.Render()
     render.compression_filter = Spatializer.Compressing.Downsample512()
     pose_estimators = {'naive': select_pose_estimator('Naive'), 'onset': select_pose_estimator('Onset'), 'twoshot': select_pose_estimator('TwoShot')}
-    for estimator in pose_estimators.value(): estimator.presence_detector.detection_threshold = 4.
+    for estimator in pose_estimators.values(): estimator.presence_detector.detection_threshold = 4.
+    estimator_type = 'naive'
     compressed_distances = render.compression_filter(Setting.DISTANCE_ENCODING)
     bat_pose = np.asarray([0., 0., 0.])
     init_flowers_pose = [
@@ -336,7 +337,7 @@ def utest_render_3():
     cartesian_objects_matrix = np.asarray(init_flowers_pose).astype(np.float32)
     render.run(bat_pose, cartesian_objects_matrix)
     inputs = np.concatenate([render.compress_left, render.compress_right]).reshape(1,2,-1)
-    prediction = pose_estimator(inputs)
+    prediction = pose_estimators[estimator_type](inputs)
     fig = plt.figure(figsize=(12, 6), dpi=200)
     gs = GridSpec(10, 10, figure=fig)
     ax1 = fig.add_subplot(gs[:,:4])
@@ -371,17 +372,18 @@ def utest_render_3():
             compressed_distances, render.compress_left, render.compress_right, title='Echo envelope of the scene')
     inputs_left_, inputs_right_, ax3 = set_up_waveform_plot(ax3,
             compressed_distances,
-            pose_estimator.cache['inputs'][0,0,:],
-            pose_estimator.cache['inputs'][0,1,:], title='Inputs to the estimator')
+            pose_estimators[estimator_type].cache['inputs'][0,0,:],
+            pose_estimators[estimator_type].cache['inputs'][0,1,:], title='Inputs to the estimator')
     
-    ax2.plot(compressed_distances, pose_estimator.presence_detector.profile*5, 'k--', linewidth=0.5, alpha=0.5)
-    ax3.plot(compressed_distances, pose_estimator.presence_detector.profile, 'k--', linewidth=0.5, alpha=0.5)
+    ax2.plot(compressed_distances, pose_estimators[estimator_type].presence_detector.profile*5, 'k--', linewidth=0.5, alpha=0.5)
+    ax3.plot(compressed_distances, pose_estimators[estimator_type].presence_detector.profile, 'k--', linewidth=0.5, alpha=0.5)
 
 
     fig.subplots_adjust(left=.2, right=0.9)
     
     bat_ori_slider_ax = fig.add_axes([0.08, 0.95, 0.3, 0.01])
     flowers_checkbox_ax = fig.add_axes([ 0.92, 0.05, 0.05, 0.5 ])
+    estimator_type_radio_ax = fig.add_axes([ 0.92, 0.6, 0.05, 0.2 ])
     flowers_slider_ax = []
     for i in range(len(init_flowers_pose)):
         flowers_slider_ax.append(fig.add_axes([0.02, 0.05 + i*(0.6/len(init_flowers_pose)+0.08), 0.01, 0.6/len(init_flowers_pose)]))
@@ -397,11 +399,13 @@ def utest_render_3():
     flowers_checkbox_txt = []
     for i in range(len(init_flowers_pose)): flowers_checkbox_txt.append(f'F{i}')
     flowers_checkbox = widgets.CheckButtons(flowers_checkbox_ax, flowers_checkbox_txt, [True]*len(init_flowers_pose))
+    estimator_type_radio = widgets.RadioButtons(estimator_type_radio_ax, ['naive', 'onset', 'twoshot'], active=0)
 
 
 
     def update(val):
         flower_status = flowers_checkbox.get_status()
+        estimator_type = estimator_type_radio.value_selected
         bat_pose = np.zeros(3).astype(float)
         bat_pose[2] = np.radians(bat_ori_slider.val)
         for i in range(len(cartesian_objects_matrix)):
@@ -410,7 +414,7 @@ def utest_render_3():
             cartesian_objects_matrix[i,2] = np.radians(flowers_slider[i*3+2].val) if flower_status[i] else 0.
         render.run(bat_pose, cartesian_objects_matrix)
         inputs = np.concatenate([render.compress_left, render.compress_right]).reshape(1,2,-1)
-        prediction = pose_estimator(inputs)
+        prediction = pose_estimators[estimator_type](inputs)
         # if prediction[0]:
         #     print('gt orientation: {:.2f}'.format(np.degrees( render.viewer.filtered_objects_inview_polar[0,2] )))
         #     print('pred orientation: {:.2f}'.format(np.degrees(prediction[2])))
@@ -440,20 +444,22 @@ def utest_render_3():
                 dy=FLOWER_ARROW_LENGTH*np.sin(est_flower_pose[2]))
         envelope_left_.set_ydata(render.compress_left)
         envelope_right_.set_ydata(render.compress_right)
-        inputs_left_.set_ydata(pose_estimator.cache['inputs'][0,0,:])
-        inputs_right_.set_ydata(pose_estimator.cache['inputs'][0,1,:])
+        inputs_left_.set_ydata(pose_estimators[estimator_type].cache['inputs'][0,0,:])
+        inputs_right_.set_ydata(pose_estimators[estimator_type].cache['inputs'][0,1,:])
         
         
         fig.canvas.draw_idle()
     bat_ori_slider.on_changed(update)
     flowers_checkbox.on_clicked(update)
+    estimator_type_radio.on_clicked(update)
     for slider in flowers_slider: slider.on_changed(update)
 
     plt.show()
 
 def main():
     #return utest_render_1()
-    return utest_render_2(sys.argv[1] if len(sys.argv)>1 else 'Naive')
+    #return utest_render_2(sys.argv[1] if len(sys.argv)>1 else 'Naive')
+    return utest_render_3()
 
 if __name__ == '__main__':
     main()
