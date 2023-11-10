@@ -40,7 +40,7 @@ FLOWER_ARROW_LENGTH = 0.2
 BAT_ARROW_LENGTH = 0.3
 
 DOCKZONE_RADIUS = 0.7
-MIN_TURNING_RADIUS = 0.1
+MIN_TURNING_RADIUS = 0.35
 
 FONT = {'size': 10}
 
@@ -82,41 +82,140 @@ def circle_around_pose_notched(pose:ArrayLike, radius:float=DOCKZONE_RADIUS, n_p
         ])
     return x, y
 
+
 class DubinsParams:
     def __init__(self, **kwargs):
-        self.mode: List[str] = kwargs.get('mode', [])
+        self.modes: List[str] = kwargs.get('mode', [])
         self.quantities: List[float] = kwargs.get('quantities', [])
         self.cost: float = kwargs.get('cost', 0.)
         self.radii: List[float] = kwargs.get('radii', [])
+        # above are the bare minimum to reconstruct the path.
+        # below are the optional parameters, can be helpful to reuse it for different task
+        self.centers: List[ArrayLike] = kwargs.get('centers', [])
+        self.tangent_points: List[ArrayLike] = kwargs.get('tangent_points', [])
+        self.path_waypoints: Tuple[ArrayLike] = kwargs.get('path_waypoints', None)
+        
 
 class DubinsPathPlanner:
     def __init__(self,
                  min_turn_radius: float=MIN_TURNING_RADIUS,):
         self.min_turn_radius = min_turn_radius
+        self.modes_collections = [
+            ['L', 'S', 'L'],
+            ['R', 'S', 'R'],
+            ['L', 'S', 'R'],
+            ['R', 'S', 'L'],
+        ]
 
     # solve for each mode then take the best one.
 
-    def _solve_LSL(self, start_pose: ArrayLike, end_pose: ArrayLike, min_turn_radius: float=MIN_TURNING_RADIUS) -> DubinsParams:
-        mode = ['L', 'S', 'L']
+    def __call__(self, *args, **kwargs) -> DubinsParams:
+        return self.run(*args, **kwargs)
+    
+    def run(self, start_pose: ArrayLike, target_pose: ArrayLike) -> DubinsParams:
+        candidate_paths = []
+        best = np.inf
+        best_idx = -1
+        for i, modes in enumerate(self.modes_collections):
+            path = self._solve_path(start_pose, target_pose, self.min_turn_radius, modes)
+            candidate_paths.append(path)
+            if path.cost < best:
+                best = path.cost
+                best_idx = i
+        return self.add_waypoints_to_path(candidate_paths[best_idx])
+    
+    def add_waypoints_to_path(self, path: DubinsParams, n_points:int=50) -> DubinsParams:
+        if not (np.any(path.tangent_points[0])and np.any(path.tangent_points[1])): return None
+        if path.modes[1] != 'S': raise NotImplementedError('Only support CSC for now.')
+        alpha = np.arctan2(path.tangent_points[0][1] - path.centers[0][1], path.tangent_points[0][0] - path.centers[0][0])
+        theta = np.linspace(alpha-path.quantities[0], alpha, n_points)
+        segment0x = np.cos(theta)*path.radii[0] + path.centers[0][0]
+        segment0y = np.sin(theta)*path.radii[0] + path.centers[0][1]
+        segment1x = np.linspace(path.tangent_points[0][0], path.tangent_points[1][0], n_points)
+        segment1y = np.linspace(path.tangent_points[0][1], path.tangent_points[1][1], n_points)
+        alpha = np.arctan2(path.tangent_points[1][1] - path.centers[2][1], path.tangent_points[1][0] - path.centers[2][0])
+        theta = np.linspace(alpha, alpha+path.quantities[2], n_points)
+        segment2x = np.cos(theta)*path.radii[2] + path.centers[2][0]
+        segment2y = np.sin(theta)*path.radii[2] + path.centers[2][1]
+        x = np.concatenate((segment0x, segment1x, segment2x))
+        y = np.concatenate((segment0y, segment1y, segment2y))
+        path.path_waypoints = (x, y)
+        return path
+
+    def _solve_path(self, start_pose: ArrayLike, end_pose: ArrayLike, min_turn_radius, modes: List[str]) -> DubinsParams:
         radii = [min_turn_radius, np.inf, min_turn_radius]
-        # FOR CSC.
-        # find center of rotation for each curves.
-        # find straight tagent line on both curves
-        # find the intersection between tagent line and circles.
-        # find the amount of angle for first rotation and last rotation.
-        # fint he distance between 2 tagent points.
+        centers, tangent_points = self._find_key_points(start_pose, end_pose, modes, min_turn_radius)
+        quantities = self._compute_quantities(start_pose, end_pose, centers, tangent_points, modes)
+        cost = self._compute_cost(radii, quantities, modes)
+        return DubinsParams(mode=modes, radii=radii, quantities=quantities, cost=cost, centers=centers, tangent_points=tangent_points)
+    
+    def _find_key_points(self, star_pose: ArrayLike, end_pose: ArrayLike, modes:List[str], min_turn_radius:float) -> Tuple[List[ArrayLike],
+                                                                                                                                 List[ArrayLike]]:
+        centers = []
+        centers.append(self._find_center_of_rotation(star_pose, modes[0], min_turn_radius))
+        if modes[1] != 'S': raise NotImplementedError('Only support CSC for now.')
+        else: centers.append(None)
+        centers.append(self._find_center_of_rotation(end_pose, modes[2], min_turn_radius))
+        tangent_points = self._find_tangent_points_CSC(centers, modes, min_turn_radius)
+        return centers, tangent_points
 
-    def _solve_LRL(self, start_pose: ArrayLike, end_pose: ArrayLike, min_turn_radius: float=MIN_TURNING_RADIUS) -> DubinsParams:
-        mode = ['L', 'R', 'L']
-        radii = [min_turn_radius, min_turn_radius, min_turn_radius]
-        # FOR CCC.
-        # find center of rotation for each curves.
-        # if the distance between 2 centers > 4*min_turn_radius, then there is no solution.
-        # find the center of the tagent curve.
-        # find the intersection between tagent curve and circles.
-        # find the amount of angle for first rotation and last rotation.
-        # fint he distance between 2 tagent points.
+    def _find_center_of_rotation(self, pose:ArrayLike, mode:str, min_turn_radius:float) -> ArrayLike:
+        if mode == 'L':
+            center = pose[:2] + min_turn_radius*np.array([np.cos(pose[2]+0.5*np.pi), np.sin(pose[2]+0.5*np.pi)])
+        if mode == 'R':
+            center = pose[:2] + min_turn_radius*np.array([np.cos(pose[2]-0.5*np.pi), np.sin(pose[2]-0.5*np.pi)])
+        return center
+    
+    def _find_tangent_points_CSC(self, centers: List[ArrayLike], modes: List[str], min_turn_radius: float) -> List[ArrayLike]:
+        # distance between 2 centers
+        d = np.linalg.norm(centers[0] - centers[2])
+        if d < 2*min_turn_radius and (modes[0]!= modes[2]): return [None, None] # no solution found
+        # find the angle between 2 centers
+        theta = np.arctan2(centers[2][1] - centers[0][1], centers[2][0] - centers[0][0])
+        tangent_points = []
+        if modes[0] == modes[2]:
+            alpha = theta - 0.5*np.pi if modes[0] == 'L' else theta + 0.5*np.pi
+            tangent_points.append(centers[0] + min_turn_radius*np.array([np.cos(alpha), np.sin(alpha)]))
+            tangent_points.append(centers[2] + min_turn_radius*np.array([np.cos(alpha), np.sin(alpha)]))
+        else:
+            beta = np.arccos(2*min_turn_radius/d)
+            if modes[0] == 'L': # modes[2] == 'R'
+                tangent_points.append(centers[0] \
+                    + min_turn_radius*np.array([np.cos(theta-beta), np.sin(theta-beta)]))
+                tangent_points.append(centers[2] \
+                    + min_turn_radius*np.array([np.cos(theta-beta-np.pi), np.sin(theta-beta-np.pi)]))
+            elif modes[0] == 'R': # modes[2] == 'L'
+                tangent_points.append(centers[0] \
+                    + min_turn_radius*np.array([np.cos(theta+beta), np.sin(theta+beta)]))
+                tangent_points.append(centers[2] \
+                    + min_turn_radius*np.array([np.cos(theta+beta+np.pi), np.sin(theta+beta+np.pi)]))
+            else: raise ValueError('modes[0] and modes[2] must be either L or R. but got {} and {}'.format(modes[0], modes[2]))
+        return tangent_points
 
+    def _compute_cost(self, radii: List[float], quantities:List[float], modes: List[str]) -> float:
+        cost = 0.
+        for i in range(len(modes)):
+            if modes[i] == 'S': cost += quantities[i]
+            else:
+                cost += radii[i] * np.abs(quantities[i])
+        return cost
+
+    def _compute_quantities(self, start_pose: ArrayLike, target_pose: ArrayLike,
+                            centers: List[ArrayLike], tangent_points: List[ArrayLike], modes: List[str]) -> List[float]:
+        if not (np.any(tangent_points[0])and np.any(tangent_points[1])): return [np.inf, np.inf, np.inf]
+        quantities = []
+        for i, m in enumerate(modes):
+            first_pose = start_pose if i==0 else tangent_points[i-1]
+            second_pose = target_pose if i==2 else tangent_points[i]
+            if m == 'S': quantities.append(np.linalg.norm(second_pose - first_pose))
+            else:
+                # alpha is the relative theta of first pose to the center
+                # beta is the relative theta of second pose to the center
+                alpha = np.arctan2(first_pose[1] - centers[i][1], first_pose[0] - centers[i][0])
+                beta = np.arctan2(second_pose[1] - centers[i][1], second_pose[0] - centers[i][0])
+                if m=='L': quantities.append( (beta-alpha)%(2*np.pi) )
+                else: quantities.append( -1*((alpha-beta)%(2*np.pi)) )
+        return quantities
 
 # possible dubin paths: CSC, CCC
 # 1. CSC: LSL, RSR, LSR, RSL
@@ -155,6 +254,7 @@ def utest_widget():
     render.compression_filter = Spatializer.Compressing.Downsample512()
     pose_estimators = {'naive': select_pose_estimator('Naive'), 'onset': select_pose_estimator('Onset'), 'twoshot': select_pose_estimator('TwoShot')}
     for estimator in pose_estimators.values(): estimator.presence_detector.detection_threshold = 4.
+    path_planer = DubinsPathPlanner()
     estimator_type = 'naive'
     compressed_distances = render.compression_filter(Setting.DISTANCE_ENCODING)
     bat_pose = np.asarray([0., 0., 0.])
@@ -189,7 +289,13 @@ def utest_widget():
                 width=0.05, head_width=0.1, head_length=0.05, fc='m', ec='m'))
     
     dockzone_circle, = ax1.plot(*circle_around_pose_notched(est_flower_pose), 'k:', linewidth=1.0, alpha=0.5)
-    
+    target_pose = est_flower_pose.copy()
+    target_pose[2] = Spatializer.wrapToPi(target_pose[2] + np.pi)
+    path = path_planer(bat_pose, target_pose)
+    path_line, = ax1.plot(*path.path_waypoints, 'b--', linewidth=1.0, alpha=0.5)
+    path_keypoints, = ax1.plot([path.centers[0][0], path.centers[2][0], path.tangent_points[0][0], path.tangent_points[1][0]],
+                                 [path.centers[0][1], path.centers[2][1], path.tangent_points[0][1], path.tangent_points[1][1]],
+                                 'kx', markersize=5, alpha=0.5)
     ax1.set_xlim([-3,3])
     ax1.set_ylim([-3,3])
     
@@ -276,6 +382,16 @@ def utest_widget():
                 dy=FLOWER_ARROW_LENGTH*np.sin(cartesian_objects_matrix[i,2]))
             flowers_arrows[i].set_visible(flower_status[i])
             for w in range(3): flowers_slider_ax[i*3 + w].set_visible(flower_status[i])
+
+        target_pose = est_flower_pose.copy()
+        target_pose[2] = Spatializer.wrapToPi(target_pose[2] + np.pi)
+        path = path_planer(bat_pose, target_pose)
+
+        print('quantities: {:.2f}, {:.2f}, {:.2f}'.format(np.degrees(path.quantities[0]), path.quantities[1], np.degrees(path.quantities[2])))
+
+        path_line.set_data(*path.path_waypoints)
+        path_keypoints.set_xdata([path.centers[0][0], path.centers[2][0], path.tangent_points[0][0], path.tangent_points[1][0]])
+        path_keypoints.set_ydata([path.centers[0][1], path.centers[2][1], path.tangent_points[0][1], path.tangent_points[1][1]])
 
         flower0_est_arrow.set_data(x=est_flower_pose[0], y=est_flower_pose[1],
                 dx=FLOWER_ARROW_LENGTH*np.cos(est_flower_pose[2]),
