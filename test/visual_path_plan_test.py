@@ -176,19 +176,25 @@ class DubinsDockZonePathPlanner:
         # check whether the large circle candidate is valid
         # there should only be a single valid candidate --> I think
         # If the large circle candidate is valid --> take the candidate from the large circle, add one more tagent point as the intersection between large and small circle.
-        # -> The solution should contain 3 segment [C,S,C,C] with the last curve is the half small circle.
-        # If the small circle candidate is valid --
+        # -> The solution should contain 4 segment [C,S,C,C] with the last curve is the half small circle.
+        # If the small circle candidate is valid --> Take the candidate from the small circle.
+        # -> The solution should contain 3 segment [C,S,C]
+        # If both candidate are invalid --> return None
+        return None
         
 
     def _find_tangent_points_CSC(self, centers: List[ArrayLike], modes: List[str], radii: List[float]) -> List[ArrayLike]:
         # distance between 2 centers
         d = np.linalg.norm(centers[0] - centers[2])
+        if d < np.abs(radii[0]-radii[2]): return [None, None] # no solution found, one circle is inside the other
         if d < (radii[0]+radii[2]) and (modes[0]!= modes[2]): return [None, None] # no solution found
+        if d < np.abs(radii[0]-radii[2]): return [None, None] # no solution found
         # find the angle between 2 centers
         theta = np.arctan2(centers[2][1] - centers[0][1], centers[2][0] - centers[0][0])
         tangent_points = []
         if modes[0] == modes[2]:
-            alpha = theta - 0.5*np.pi if modes[0] == 'L' else theta + 0.5*np.pi
+            beta = np.pi - np.arccos(np.sign(radii[2]-radii[0])*(radii[2] - radii[0])/d)
+            alpha = theta - beta if modes[0] == 'L' else theta + beta
             tangent_points.append(centers[0] + radii[0]*np.array([np.cos(alpha), np.sin(alpha)]))
             tangent_points.append(centers[2] + radii[2]*np.array([np.cos(alpha), np.sin(alpha)]))
         else:
@@ -255,7 +261,7 @@ class DubinsPathPlanner:
         return path
 
     def _solve_path(self, start_pose: ArrayLike, end_pose: ArrayLike, min_turn_radius: float, modes: List[str]) -> DubinsParams:
-        radii = [min_turn_radius, np.inf, min_turn_radius]
+        radii = [min_turn_radius, np.inf, min_turn_radius*4]
         centers, tangent_points = self._find_key_points(start_pose, end_pose, modes, radii)
         quantities = self._compute_quantities(start_pose, end_pose, centers, tangent_points, modes)
         cost = self._compute_cost(radii, quantities, modes)
@@ -281,12 +287,15 @@ class DubinsPathPlanner:
     def _find_tangent_points_CSC(self, centers: List[ArrayLike], modes: List[str], radii: List[float]) -> List[ArrayLike]:
         # distance between 2 centers
         d = np.linalg.norm(centers[0] - centers[2])
+        if d < np.abs(radii[0]-radii[2]): return [None, None] # no solution found, one circle is inside the other
         if d < (radii[0]+radii[2]) and (modes[0]!= modes[2]): return [None, None] # no solution found
+        if d < np.abs(radii[0]-radii[2]): return [None, None] # no solution found
         # find the angle between 2 centers
         theta = np.arctan2(centers[2][1] - centers[0][1], centers[2][0] - centers[0][0])
         tangent_points = []
         if modes[0] == modes[2]:
-            alpha = theta - 0.5*np.pi if modes[0] == 'L' else theta + 0.5*np.pi
+            beta = np.pi - np.arccos(np.sign(radii[2]-radii[0])*(radii[2] - radii[0])/d)
+            alpha = theta - beta if modes[0] == 'L' else theta + beta
             tangent_points.append(centers[0] + radii[0]*np.array([np.cos(alpha), np.sin(alpha)]))
             tangent_points.append(centers[2] + radii[2]*np.array([np.cos(alpha), np.sin(alpha)]))
         else:
@@ -498,8 +507,9 @@ def utest_widget():
         target_pose = est_flower_pose.copy()
         target_pose[2] = Spatializer.wrapToPi(target_pose[2] + np.pi)
         path = path_planer(bat_pose, target_pose)
-
-        
+        d = np.linalg.norm(path.centers[2] - path.centers[0])
+        if d < np.abs(path.radii[0]-path.radii[2]): path_line.set_visible(False)
+        else: path_line.set_visible(True)
 
         path_line.set_data(*path.path_waypoints)
         path_keypoints.set_xdata([path.centers[0][0], path.centers[2][0], path.tangent_points[0][0], path.tangent_points[1][0]])
