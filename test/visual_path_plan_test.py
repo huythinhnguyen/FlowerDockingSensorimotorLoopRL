@@ -109,18 +109,20 @@ class DubinsDockZonePathPlanner:
     def __call__(self, *args, **kwargs) -> DubinsParams:
         return self.run(*args, **kwargs)
     
-    def run(self, start_pose: ArrayLike, target_pose: ArrayLike) -> DubinsParams:
+    def run(self, start_pose: ArrayLike, dockzone_circle: DockZoneNotchedCircle) -> DubinsParams:
+        
         candidate_paths = []
         best = np.inf
         best_idx = -1
         for i, modes in enumerate(self.modes_collections):
-            path = self._solve_path(start_pose, target_pose, self.min_turn_radius, modes)
+            path = self._solve_path(start_pose, dockzone_circle, self.min_turn_radius, modes)
             candidate_paths.append(path)
             if path.cost < best:
                 best = path.cost
                 best_idx = i
         return self.add_waypoints_to_path(candidate_paths[best_idx])
     
+    # TODO: This one was copy from the vanila version. May need modification.
     def add_waypoints_to_path(self, path: DubinsParams, n_points:int=50) -> DubinsParams:
         if not (np.any(path.tangent_points[0])and np.any(path.tangent_points[1])): return None
         if path.modes[1] != 'S': raise NotImplementedError('Only support CSC for now.')
@@ -134,6 +136,11 @@ class DubinsDockZonePathPlanner:
         theta = np.linspace(alpha, alpha+path.quantities[2], n_points)
         segment2x = np.cos(theta)*path.radii[2] + path.centers[2][0]
         segment2y = np.sin(theta)*path.radii[2] + path.centers[2][1]
+        if len(path.modes) >3:
+            alpha = np.arctan2(path.tangent_points[2][1] - path.centers[3][1], path.tangent_points[2][0] - path.centers[3][0])
+            theta = np.linspace(alpha, alpha+path.quantities[3], n_points)
+            segment2x = np.concatenate((segment2x, np.cos(theta)*path.radii[3] + path.centers[3][0] ))
+            segment2y = np.concatenate((segment2y, np.sin(theta)*path.radii[3] + path.centers[3][1] ))
         x = np.concatenate((segment0x, segment1x, segment2x))
         y = np.concatenate((segment0y, segment1y, segment2y))
         path.path_waypoints = (x, y)
@@ -141,13 +148,13 @@ class DubinsDockZonePathPlanner:
 
     def _solve_path(self, start_pose: ArrayLike, dockzone_circle: DockZoneNotchedCircle, min_turn_radius: float, modes: List[str]) -> DubinsParams:
         radii = [min_turn_radius, np.inf, dockzone_circle.radius*0.5, dockzone_circle.radius]
-        end_pose = np.asarray([dockzone_circle.x, dockzone_circle.y, (dockzone_circle.theta - np.pi)%np.pi])
-        centers, tangent_points, radii = self._find_key_points(start_pose, end_pose, modes, radii)
+        end_pose = np.asarray([dockzone_circle.x, dockzone_circle.y, Spatializer.wrapToPi(dockzone_circle.theta + np.pi)])
+        centers, tangent_points, radii, modes = self._find_key_points(start_pose, end_pose, modes, radii, dockzone_circle.theta)
         quantities = self._compute_quantities(start_pose, end_pose, centers, tangent_points, modes)
         cost = self._compute_cost(radii, quantities, modes)
         return DubinsParams(mode=modes, radii=radii, quantities=quantities, cost=cost, centers=centers, tangent_points=tangent_points)
     
-    def _find_key_points(self, star_pose: ArrayLike, end_pose: ArrayLike, modes:List[str], radii:List[float]) -> Tuple[List[ArrayLike],
+    def _find_key_points(self, star_pose: ArrayLike, end_pose: ArrayLike, modes:List[str], radii:List[float], dockzone_theta:float) -> Tuple[List[ArrayLike],
                                                                                                                                  List[ArrayLike]]:
         centers = []
         centers.append(self._find_center_of_rotation(star_pose, modes[0], radii[0]))
@@ -155,8 +162,8 @@ class DubinsDockZonePathPlanner:
         else: centers.append(None)
         centers.append(self._find_center_of_rotation(end_pose, modes[2], radii[2]))
         centers.append(np.asarray([end_pose[0], end_pose[1]]))
-        tangent_points, centers, radii = self._find_tangent_points_CSC(centers, modes, radii)
-        return centers, tangent_points, radii
+        tangent_points, centers, radii, modes = self._find_tangent_points(centers, modes, radii, dockzone_theta=dockzone_theta)
+        return centers, tangent_points, radii, modes
     
     def _find_center_of_rotation(self, pose:ArrayLike, mode:str, min_turn_radius:float) -> ArrayLike:
         if mode == 'L':
@@ -166,21 +173,45 @@ class DubinsDockZonePathPlanner:
         return center
     
 
-    def _find_tangent_points(self, centers: List[ArrayLike], modes: List[str], radii: List[float]) -> Tuple[List[ArrayLike]]:
+    def _find_tangent_points(self, centers: List[ArrayLike], modes: List[str], radii: List[float], dockzone_theta:float) -> Tuple[List[ArrayLike]]:
         candidate_tangent_points = []
         # compute tangent candidates from the small circle
         candidate_tangent_points.append(self._find_tangent_points_CSC(centers[:2]+[centers[2]], modes[:2]+[modes[2]], radii[:2]+[radii[2]]))
         # compute tangent candidates from the big circle
         candidate_tangent_points.append(self._find_tangent_points_CSC(centers[:2]+[centers[3]], modes[:2]+[modes[3]], radii[:2]+[radii[3]]))
-        # check whether the small circle candidate is valid
-        # check whether the large circle candidate is valid
-        # there should only be a single valid candidate --> I think
-        # If the large circle candidate is valid --> take the candidate from the large circle, add one more tagent point as the intersection between large and small circle.
-        # -> The solution should contain 4 segment [C,S,C,C] with the last curve is the half small circle.
-        # If the small circle candidate is valid --> Take the candidate from the small circle.
-        # -> The solution should contain 3 segment [C,S,C]
-        # If both candidate are invalid --> return None
-        return None
+        valids = []
+        valids.append(self._is_tagent_points_valid(candidate_tangent_points[0], centers, dockzone_theta, large_circle=False))
+        valids.append(self._is_tagent_points_valid(candidate_tangent_points[1], centers, dockzone_theta, large_circle=True))
+        if np.sum(valids) == 0: return [None]*(len(centers)-1), centers, radii, modes
+        if np.sum(valids) == 2: print('Warning: There are 2 valid tangent points. I did not anticipate this case.')
+        if valids[0]:
+            centers = centers[:2] + [centers[2]]
+            radii = radii[:2] + [radii[2]]
+            tangent_points = candidate_tangent_points[0]
+            modes = modes[:2] + [modes[2]]
+        else:
+            centers = centers[:2] + [centers[3], centers[2]]
+            radii = radii[:2] + [radii[3], radii[2]]
+            # find a theta from large circle to small circle, small circle is centers[2], large circle is centers[3]
+            # BUG: the intersection is on the opposite side.
+            theta = np.arctan2(centers[3][1] - centers[2][1], centers[3][0] - centers[2][0])
+            intersection_between_two_circles = centers[2] + radii[2]*np.array([np.cos(theta), np.sin(theta)])
+            tangent_points = candidate_tangent_points[1] + [intersection_between_two_circles]
+            modes = modes[:2] + [modes[3], modes[2]]
+        return tangent_points, centers, radii, modes
+
+    def _is_tagent_points_valid(self, tangent_points: List[ArrayLike], centers: List[ArrayLike], dockzone_theta:float, large_circle=True) -> bool:
+        tangent_point = tangent_points[1]
+        if not np.any(tangent_point): return False
+        # BUG: When two circles are very close.
+        # alpha = np.arctan2(tangent_point[1] - centers[2][1], tangent_point[0] - centers[2][0])
+        # TypeError: 'NoneType' object is not subscriptable
+        alpha = np.arctan2(tangent_point[1] - centers[2][1], tangent_point[0] - centers[2][0])
+        if large_circle: # np.mod(x + np.pi, 2*np.pi) - np.pi
+            if np.abs(np.mod(alpha - dockzone_theta + np.pi, 2*np.pi) - np.pi  ) >= np.pi/2: return True
+        else:
+            if np.abs(np.mod(alpha - dockzone_theta + np.pi, 2*np.pi) - np.pi  ) < np.pi/2: return True
+        return False
         
 
     def _find_tangent_points_CSC(self, centers: List[ArrayLike], modes: List[str], radii: List[float]) -> List[ArrayLike]:
@@ -212,7 +243,34 @@ class DubinsDockZonePathPlanner:
             else: raise ValueError('modes[0] and modes[2] must be either L or R. but got {} and {}'.format(modes[0], modes[2]))
         return tangent_points
 
+    # This function is Fine.
+    def _compute_cost(self, radii: List[float], quantities:List[float], modes: List[str]) -> float:
+        cost = 0.
+        for i in range(len(modes)):
+            if modes[i] == 'S': cost += quantities[i]
+            else:
+                cost += radii[i] * np.abs(quantities[i])
+        return cost
 
+    # This function will may need to be modified.
+    def _compute_quantities(self, start_pose: ArrayLike, target_pose: ArrayLike,
+                            centers: List[ArrayLike], tangent_points: List[ArrayLike], modes: List[str]) -> List[float]:
+        for tangent_point in tangent_points:
+            if not np.any(tangent_point): return [np.inf]*(len(modes))
+        quantities = []
+        for i, m in enumerate(modes):
+            first_pose = tangent_points[i-1] if i>0 else start_pose
+            second_pose = tangent_points[i] if i<(len(modes)-1) else target_pose
+            if m == 'S': quantities.append(np.linalg.norm(second_pose - first_pose))
+            else:
+                # alpha is the relative theta of first pose to the center
+                # beta is the relative theta of second pose to the center
+                alpha = np.arctan2(first_pose[1] - centers[i][1], first_pose[0] - centers[i][0])
+                beta = np.arctan2(second_pose[1] - centers[i][1], second_pose[0] - centers[i][0])
+                if m=='L': quantities.append( (beta-alpha)%(2*np.pi) )
+                else: quantities.append( -1*((alpha-beta)%(2*np.pi)) )
+        #print(modes, quantities, len(centers), len(tangent_points))
+        return quantities
 
 class DubinsPathPlanner:
     def __init__(self,
@@ -375,7 +433,7 @@ def utest_widget():
     render.compression_filter = Spatializer.Compressing.Downsample512()
     pose_estimators = {'naive': select_pose_estimator('Naive'), 'onset': select_pose_estimator('Onset'), 'twoshot': select_pose_estimator('TwoShot')}
     for estimator in pose_estimators.values(): estimator.presence_detector.detection_threshold = 4.
-    path_planer = DubinsPathPlanner()
+    path_planer = DubinsDockZonePathPlanner()
     estimator_type = 'naive'
     compressed_distances = render.compression_filter(Setting.DISTANCE_ENCODING)
     bat_pose = np.asarray([0., 0., 0.])
@@ -410,13 +468,16 @@ def utest_widget():
                 width=0.05, head_width=0.1, head_length=0.05, fc='m', ec='m'))
     
     dockzone_circle, = ax1.plot(*circle_around_pose_notched(est_flower_pose), 'k:', linewidth=1.0, alpha=0.5)
-    target_pose = est_flower_pose.copy()
-    target_pose[2] = Spatializer.wrapToPi(target_pose[2] + np.pi)
-    path = path_planer(bat_pose, target_pose)
+    dockzone = get_dockzone_notched_circle(est_flower_pose)
+    path = path_planer(bat_pose, dockzone)
     path_line, = ax1.plot(*path.path_waypoints, 'b--', linewidth=1.0, alpha=0.5)
-    path_keypoints, = ax1.plot([path.centers[0][0], path.centers[2][0], path.tangent_points[0][0], path.tangent_points[1][0]],
-                                 [path.centers[0][1], path.centers[2][1], path.tangent_points[0][1], path.tangent_points[1][1]],
-                                 'kx', markersize=5, alpha=0.5)
+    for i in range(len(path.centers)):
+        if i==1: continue
+        centers_x = [path.centers[i][0]]
+        centers_y = [path.centers[i][1]]
+    tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
+    tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
+    path_keypoints, = ax1.plot(centers_x + tangent_points_x, centers_y + tangent_points_y, 'kx', markersize=5, alpha=0.5)
     ax1.set_xlim([-3,3])
     ax1.set_ylim([-3,3])
     
@@ -504,17 +565,21 @@ def utest_widget():
             flowers_arrows[i].set_visible(flower_status[i])
             for w in range(3): flowers_slider_ax[i*3 + w].set_visible(flower_status[i])
 
-        target_pose = est_flower_pose.copy()
-        target_pose[2] = Spatializer.wrapToPi(target_pose[2] + np.pi)
-        path = path_planer(bat_pose, target_pose)
+        dockzone = get_dockzone_notched_circle(est_flower_pose)
+        path = path_planer(bat_pose, dockzone)
         d = np.linalg.norm(path.centers[2] - path.centers[0])
         if d < np.abs(path.radii[0]-path.radii[2]): path_line.set_visible(False)
         else: path_line.set_visible(True)
 
         path_line.set_data(*path.path_waypoints)
-        path_keypoints.set_xdata([path.centers[0][0], path.centers[2][0], path.tangent_points[0][0], path.tangent_points[1][0]])
-        path_keypoints.set_ydata([path.centers[0][1], path.centers[2][1], path.tangent_points[0][1], path.tangent_points[1][1]])
-
+        for i in range(len(path.centers)):
+            if i==1: continue
+            centers_x = [path.centers[i][0]]
+            centers_y = [path.centers[i][1]]
+        tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
+        tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
+        path_keypoints.set_xdata(centers_x + tangent_points_x)
+        path_keypoints.set_ydata(centers_y + tangent_points_y)
         flower0_est_arrow.set_data(x=est_flower_pose[0], y=est_flower_pose[1],
                 dx=FLOWER_ARROW_LENGTH*np.cos(est_flower_pose[2]),
                 dy=FLOWER_ARROW_LENGTH*np.sin(est_flower_pose[2]))
