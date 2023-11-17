@@ -6,13 +6,15 @@ Basic features
     + continuously draw a path to estimated flower pose. Maybe flowing this list of progresses first:
         o draw a circle around the estimated pose. --> with fix radius, with fix n_points.
         o draw the notched circle instead.
-        - plan path with "dubin like curve" output should be like this.
+        o plan path with "dubin like curve" output should be like this.
             for S -> d(m)
             for C -> theta(degree), center of rotation, turning radius.
         - Convert of dubpin-bath to kinematics. [Not needed to draw but needed for control]
 Wishlist features:
     + Run a episode --> May need to add abunch of constrant in here.
     + keep track of all planned paths, all estimated poses, as well as trajactor for later replay.
+
+
 """
 import sys
 import os
@@ -40,7 +42,7 @@ FLOWER_ARROW_LENGTH = 0.2
 BAT_ARROW_LENGTH = 0.3
 
 DOCKZONE_RADIUS = 0.7
-MIN_TURNING_RADIUS = 0.35
+MIN_TURNING_RADIUS = 0.1
 
 FONT = {'size': 10}
 
@@ -97,7 +99,7 @@ class DubinsParams:
 
 
 class DubinsDockZonePathPlanner:
-    def __init__(self, min_turn_radius:float=MIN_TURNING_RADIUS):
+    def __init__(self, min_turn_radius:float=MIN_TURNING_RADIUS, collision_distance:float=0.25, collision_azimuth=np.pi/3):
         self.min_turn_radius = min_turn_radius
         self.modes_collections = [
             ['L', 'S', 'L', 'L'],
@@ -105,46 +107,51 @@ class DubinsDockZonePathPlanner:
             ['L', 'S', 'R', 'R'],
             ['R', 'S', 'L', 'L'],
         ]
+        self.collision_distance = collision_distance
+        self.collision_azimuth = collision_azimuth
     
     def __call__(self, *args, **kwargs) -> DubinsParams:
-        return self.run(*args, **kwargs)
+        return self.run2(*args, **kwargs)
     
     def run(self, start_pose: ArrayLike, dockzone_circle: DockZoneNotchedCircle) -> DubinsParams:
-        
         candidate_paths = []
         best = np.inf
         best_idx = -1
         for i, modes in enumerate(self.modes_collections):
-            path = self._solve_path(start_pose, dockzone_circle, self.min_turn_radius, modes)
+            path = self._solve_path2(start_pose, dockzone_circle, self.min_turn_radius, modes)
             candidate_paths.append(path)
             if path.cost < best:
                 best = path.cost
                 best_idx = i
         return self.add_waypoints_to_path(candidate_paths[best_idx])
     
-    # TODO: This one was copy from the vanila version. May need modification.
-    def add_waypoints_to_path(self, path: DubinsParams, n_points:int=50) -> DubinsParams:
+    def add_waypoints_to_path(self, path:DubinsParams, n_points:int=50) -> DubinsParams:
         if not (np.any(path.tangent_points[0])and np.any(path.tangent_points[1])): return None
         if path.modes[1] != 'S': raise NotImplementedError('Only support CSC for now.')
+        if path.modes[-1] == 'S': # add one more point to tangent points.
+            theta = np.arctan2(path.tangent_points[-1][1] - path.centers[-2][1], path.tangent_points[-1][0] - path.centers[-2][0])
+            theta += np.pi/2 if path.modes[-2]=='L' else -np.pi/2
+            extra_tangent_point = path.tangent_points[-1] + path.quantities[-1]*np.array([np.cos(theta), np.sin(theta)])
+            tangent_points = path.tangent_points + [extra_tangent_point]
+        else:
+            tangent_points = path.tangent_points
+        # create the first segment
         alpha = np.arctan2(path.tangent_points[0][1] - path.centers[0][1], path.tangent_points[0][0] - path.centers[0][0])
         theta = np.linspace(alpha-path.quantities[0], alpha, n_points)
-        segment0x = np.cos(theta)*path.radii[0] + path.centers[0][0]
-        segment0y = np.sin(theta)*path.radii[0] + path.centers[0][1]
-        segment1x = np.linspace(path.tangent_points[0][0], path.tangent_points[1][0], n_points)
-        segment1y = np.linspace(path.tangent_points[0][1], path.tangent_points[1][1], n_points)
-        alpha = np.arctan2(path.tangent_points[1][1] - path.centers[2][1], path.tangent_points[1][0] - path.centers[2][0])
-        theta = np.linspace(alpha, alpha+path.quantities[2], n_points)
-        segment2x = np.cos(theta)*path.radii[2] + path.centers[2][0]
-        segment2y = np.sin(theta)*path.radii[2] + path.centers[2][1]
-        if len(path.modes) >3:
-            alpha = np.arctan2(path.tangent_points[2][1] - path.centers[3][1], path.tangent_points[2][0] - path.centers[3][0])
-            theta = np.linspace(alpha, alpha+path.quantities[3], n_points)
-            segment2x = np.concatenate((segment2x, np.cos(theta)*path.radii[3] + path.centers[3][0] ))
-            segment2y = np.concatenate((segment2y, np.sin(theta)*path.radii[3] + path.centers[3][1] ))
-        x = np.concatenate((segment0x, segment1x, segment2x))
-        y = np.concatenate((segment0y, segment1y, segment2y))
+        x = np.cos(theta)*path.radii[0] + path.centers[0][0]
+        y = np.sin(theta)*path.radii[0] + path.centers[0][1]
+        for i in range(1, len(path.modes)):
+            if path.modes[i] == 'S':
+                x = np.concatenate((x, np.linspace(tangent_points[i-1][0], tangent_points[i][0], n_points)))
+                y = np.concatenate((y, np.linspace(tangent_points[i-1][1], tangent_points[i][1], n_points)))
+            else:
+                alpha = np.arctan2(tangent_points[i-1][1] - path.centers[i][1], tangent_points[i-1][0] - path.centers[i][0])
+                theta = np.linspace(alpha, alpha+path.quantities[i], n_points)
+                x = np.concatenate((x, np.cos(theta)*path.radii[i] + path.centers[i][0]))
+                y = np.concatenate((y, np.sin(theta)*path.radii[i] + path.centers[i][1]))
         path.path_waypoints = (x, y)
         return path
+
 
     def _solve_path(self, start_pose: ArrayLike, dockzone_circle: DockZoneNotchedCircle, min_turn_radius: float, modes: List[str]) -> DubinsParams:
         radii = [min_turn_radius, np.inf, dockzone_circle.radius*0.5, dockzone_circle.radius]
@@ -154,6 +161,171 @@ class DubinsDockZonePathPlanner:
         cost = self._compute_cost(radii, quantities, modes)
         return DubinsParams(mode=modes, radii=radii, quantities=quantities, cost=cost, centers=centers, tangent_points=tangent_points)
     
+    ##################################################
+    ##########  ALL NEW PROTOTYPES GO HERE  ##########
+
+    def run2(self, start_pose: ArrayLike, dockzone_circle: DockZoneNotchedCircle) -> DubinsParams:
+        candidate_paths = []
+        best = np.inf
+        best_idx = -1
+        for i, modes in enumerate(self.modes_collections):
+            path = self._solve_path2(start_pose, dockzone_circle, self.min_turn_radius, modes)
+            candidate_paths.append(path)
+            if path.cost < best:
+                best = path.cost
+                best_idx = i
+        if best < np.inf: return self.add_waypoints_to_path(candidate_paths[best_idx])
+        candidate_paths = []
+        for i, modes in enumerate(self.modes_collections):
+            for k in range(2):
+                path = self._solve_path2(start_pose, dockzone_circle, self.min_turn_radius, modes, exception=True, exception_case=k)
+                candidate_paths.append(path)
+                if path.cost < best:
+                    if self._collision_free_check(path, dockzone_circle):
+                        best = path.cost
+                        best_idx = 2*i + k
+        return self.add_waypoints_to_path(candidate_paths[best_idx])
+    
+    def _collision_free_check(self, path: DubinsParams, dockzone_circle: DockZoneNotchedCircle, epsilon:float=1e-3):
+        if not (np.any(path.tangent_points[0])and np.any(path.tangent_points[1])): return False
+        cx = dockzone_circle.x - epsilon*np.cos(dockzone_circle.theta)
+        cy = dockzone_circle.y - epsilon*np.sin(dockzone_circle.theta)
+        path  = self.add_waypoints_to_path(path, n_points=50)
+        distances = np.linalg.norm(np.asarray(( path.path_waypoints[0], path.path_waypoints[1] )) \
+                                    - np.asarray([cx, cy]).reshape(-1,1), axis=0)
+        thetas = np.arctan2(path.path_waypoints[1] - cy, path.path_waypoints[0] - cx)
+        idx = np.where(distances < self.collision_distance)
+        if np.sum(np.abs(Spatializer.wrapToPi(thetas[idx] - dockzone_circle.theta) ) > self.collision_azimuth) > 0:
+            return False
+        return True
+
+    # def collision_check(waypoints:ArrayLike, dockzone_circle:DockZoneNotchedCircle, collision_distance:float, collision_azimuth:float):
+    #     waypoints_x = waypoints[0]
+    #     waypoints_y = waypoints[1]
+    #     distances = np.linalg.norm(np.asarray((waypoints_x, waypoints_y)) - np.asarray([dockzone_circle.x, dockzone_circle.y]).reshape(-1,1), axis=0)
+    #     thetas = np.arctan2(waypoints_y - dockzone_circle.y, waypoints_x - dockzone_circle.x)
+    #     idx = np.where(distances < collision_distance)
+    #     if np.sum(np.abs(Spatializer.wrapToPi(thetas[idx] - dockzone_circle.theta) ) > collision_azimuth) > 0:
+    #         return False
+    #     return True
+
+    # def _solve_path2(self, start_pose: ArrayLike, dockzone_circle: DockZoneNotchedCircle, min_turn_radius: float, modes: List[str], exception:bool=False) -> DubinsParams:
+    #     radii = [min_turn_radius, np.inf, dockzone_circle.radius*0.5, dockzone_circle.radius]
+    #     end_pose = np.asarray([dockzone_circle.x, dockzone_circle.y, Spatializer.wrapToPi(dockzone_circle.theta + np.pi)])
+    #     #if self._is_key_points_exceptions(start_pose, end_pose, modes, radii, dockzone_circle) and exception:
+    #     if exception:
+    #         centers, tangent_points, new_radii, new_modes = self._find_key_points_w_exception(start_pose, end_pose, modes, radii, dockzone_circle.theta)
+    #     else: centers, tangent_points, new_radii, new_modes = self._find_key_points(start_pose, end_pose, modes, radii, dockzone_circle.theta)
+    #     quantities = self._compute_quantities(start_pose, end_pose, centers, tangent_points, new_modes)
+    #     cost = self._compute_cost(new_radii, quantities, new_modes)
+    #     return DubinsParams(mode=new_modes, radii=new_radii, quantities=quantities, cost=cost, centers=centers, tangent_points=tangent_points)
+
+    def _solve_path2(self, start_pose: ArrayLike, dockzone_circle: DockZoneNotchedCircle, min_turn_radius: float, modes: List[str], exception:bool=False, exception_case:int=0) -> DubinsParams:
+        radii = [min_turn_radius, np.inf, dockzone_circle.radius*0.5, dockzone_circle.radius]
+        end_pose = np.asarray([dockzone_circle.x, dockzone_circle.y, Spatializer.wrapToPi(dockzone_circle.theta + np.pi)])
+        #if self._is_key_points_exceptions(start_pose, end_pose, modes, radii, dockzone_circle) and exception:
+        if exception:
+            centers, tangent_points, new_radii, new_modes = self._find_key_points_w_exception(start_pose, end_pose, modes, radii, dockzone_circle.theta, exception_case)
+        else: centers, tangent_points, new_radii, new_modes = self._find_key_points(start_pose, end_pose, modes, radii, dockzone_circle.theta)
+        quantities = self._compute_quantities(start_pose, end_pose, centers, tangent_points, new_modes)
+        cost = self._compute_cost(new_radii, quantities, new_modes)
+        return DubinsParams(mode=new_modes, radii=new_radii, quantities=quantities, cost=cost, centers=centers, tangent_points=tangent_points)
+
+    def _is_key_points_exceptions(self, start_pose: ArrayLike, end_pose: ArrayLike, modes:List[str], radii:List[float], dockzone_circle: DockZoneNotchedCircle) -> bool:
+        # 1. The first cirle is completely inside the dockzone circle.
+        # 2. Modes needs to be CSC.
+        if modes[0]==modes[-1]: 
+            centers = [self._find_center_of_rotation(start_pose, modes[0], radii[0]), None]
+            centers.append(self._find_center_of_rotation(end_pose, modes[2], radii[2]))
+            centers.append(np.asarray([end_pose[0], end_pose[1]]))
+            d_to_large_circle = np.linalg.norm(centers[0] - centers[3])
+            d_to_small_circle = np.linalg.norm(centers[0] - centers[2])
+            # first circle is not inside the large circle:
+            if d_to_large_circle < radii[3] - radii[0]:
+                alpha = np.arctan2(centers[0][1] - centers[3][1], centers[0][0] - centers[3][0])
+                front_of_dockzone = np.abs(np.mod(alpha - dockzone_circle.theta + np.pi, 2*np.pi) - np.pi  ) < np.pi/2
+                if d_to_small_circle < radii[2] - radii[0]: return True
+                if not front_of_dockzone: return True
+        return False
+    
+    def _find_key_points_w_exception(self, start_pose: ArrayLike, end_pose: ArrayLike, modes:List[str], radii:List[float], dockzone_theta:float, exception_case:int) -> Tuple[List[ArrayLike],
+                                                                                                                                    List[ArrayLike]]:
+        cache = {'modes': modes, 'radii': radii, }
+        # if the first circle is in the front of the docking zone
+        # --> Solve for this path [CSCC]: first circle, straight, intermediate circle, small circle, endpose.
+        # if the first circle is in the back of the docking zone
+        # --> Solve for this path [CSCCC]: first circle, straight, intermediate circle, large circle, small circle (pi/2), endpose.
+        centers = [self._find_center_of_rotation(start_pose, modes[0], radii[0]), None]
+        alpha = np.arctan2(centers[0][1] - end_pose[1], centers[0][0] - end_pose[0])
+        small_circle_center = self._find_center_of_rotation(end_pose, modes[2], radii[2])
+        large_circle_center = end_pose[:2]
+        small_circle_radius = radii[2]
+        large_circle_radius = radii[3]
+        # phi = np.arctan2((end_pose[1] - start_pose[1]), (end_pose[0] - start_pose[0]))
+        # beta = np.arctan2((centers[0][1] - start_pose[1]), (centers[0][0] - start_pose[0]))
+        # if (np.abs(Spatializer.wrapToPi(beta - phi)) < np.pi/2 and modes[0] == modes[2]):
+        #     print('Reject this solution with modes = {}'.format(modes))
+        #     return centers, [None, None], radii, modes
+        #if np.abs(np.mod(alpha - dockzone_theta + np.pi, 2*np.pi) - np.pi  ) < np.pi/2: # front of the flower
+        if exception_case == 0:
+            d = np.linalg.norm(centers[0] - small_circle_center)
+            # if d > (small_circle_radius + radii[0]):
+            #     # if np.abs(Spatializer.wrapToPi(beta - phi)) < np.pi/2:
+            #     #     print('Reject this solution with modes = {}'.format(modes))
+            #     #     return centers, [None, None], radii, modes
+            #     return centers, [None, None], radii, modes
+            # CSCC solution, contact to small circle first
+            theta = np.arctan2(centers[0][1] - small_circle_center[1], centers[0][0] - small_circle_center[0])
+            intermediate_circle_center = small_circle_center + (small_circle_radius - radii[0] )*np.array([np.cos(theta), np.sin(theta)])
+            centers = [centers[0], None, intermediate_circle_center, small_circle_center]
+            radii = [radii[0], np.inf, radii[0], radii[2]]
+            modes = [modes[0], 'S', modes[2], modes[2]]
+            tangent_points = self._find_tangent_points_CSC(centers[:3], modes[:3], radii[:3])
+            tangent_points.append(small_circle_center + small_circle_radius*np.array([np.cos(theta), np.sin(theta)]))
+            # if (not self._is_tangent_points_valid(tangent_points[1:3], centers[1:4], dockzone_theta, large_circle=False)): #or\
+            # #     #np.linalg.norm(centers[0] - small_circle_center) > small_circle_radius + radii[0]:
+            #     return centers, [None, None], radii, modes
+            return centers, tangent_points, radii, modes
+        if exception_case == 1:
+            # if np.abs(Spatializer.wrapToPi(beta - phi)) < np.pi/2:
+            #     print('Reject this solution with modes = {}'.format(modes))
+            #     return centers, [None, None], radii, modes
+            # TODO: DEBUG THIS CASE
+            # CSCCC solution, contact to large circle first
+            theta = np.arctan2(centers[0][1] - large_circle_center[1], centers[0][0] - large_circle_center[0])
+            intermediate_circle_center = large_circle_center + (large_circle_radius - radii[0] )*np.array([np.cos(theta), np.sin(theta)])
+            centers = [centers[0], None, intermediate_circle_center, large_circle_center, small_circle_center]
+            radii = [radii[0], np.inf, radii[0], radii[3], radii[2]]
+            modes = [modes[0], 'S', modes[2], modes[2], modes[2]]
+            tangent_points = self._find_tangent_points_CSC(centers[:3], modes[:3], radii[:3])
+            tangent_points.append(large_circle_center + large_circle_radius*np.array([np.cos(theta), np.sin(theta)]))
+            alpha = np.arctan2(small_circle_center[1]-large_circle_center[1], small_circle_center[0] - large_circle_center[0])
+            tangent_points.append(small_circle_center + small_circle_radius*np.array([np.cos(alpha), np.sin(alpha)]))
+
+            if not self._is_tangent_points_valid(tangent_points[1:3], centers[1:4], dockzone_theta, large_circle=True):
+                if not (np.any(tangent_points[0])and np.any(tangent_points[1])): 
+                    #print('no solution in expception case 1')
+                    return centers, [None, None], radii, modes
+                new_start_pose_theta = np.arctan2(tangent_points[1][1] - centers[2][1], tangent_points[1][0] - centers[2][0])
+                new_start_pose_theta += np.pi/2 if modes[2]=='L' else -np.pi/2
+                new_start_pose = np.concatenate((tangent_points[1], np.asarray([ new_start_pose_theta ])))
+                temp_centers, temp_tangent_points, temp_radii, temp_modes = self._find_key_points(new_start_pose, end_pose, [modes[2]]+cache['modes'][1:],
+                                                                                                  [radii[2]]+cache['radii'][1:], dockzone_theta)
+                if not (np.any(temp_tangent_points[0])and np.any(temp_tangent_points[1])): 
+                    # print('Could not find solution after extending the CSCSC path.')
+                    return centers, [None, None], radii, modes
+                # print('centers', centers[:2]+temp_centers)
+                # print('tangent_points', tangent_points[:2]+temp_tangent_points)
+                # print('radii', radii[:2]+temp_radii)
+                # print('modes', modes[:2]+temp_modes)
+                return centers[:2]+temp_centers, tangent_points[:2]+temp_tangent_points, radii[:2]+temp_radii, modes[:2]+temp_modes
+            return centers, tangent_points, radii, modes
+            #print('FOUND INVALID TANGENT POINTS ON EXCEPTION CASE 1')
+            #return centers, [None, None], radii, modes
+            #return centers, tangent_points, radii, modes
+
+    ##################################################
+
     def _find_key_points(self, star_pose: ArrayLike, end_pose: ArrayLike, modes:List[str], radii:List[float], dockzone_theta:float) -> Tuple[List[ArrayLike],
                                                                                                                                  List[ArrayLike]]:
         centers = []
@@ -180,8 +352,8 @@ class DubinsDockZonePathPlanner:
         # compute tangent candidates from the big circle
         candidate_tangent_points.append(self._find_tangent_points_CSC(centers[:2]+[centers[3]], modes[:2]+[modes[3]], radii[:2]+[radii[3]]))
         valids = []
-        valids.append(self._is_tagent_points_valid(candidate_tangent_points[0], centers, dockzone_theta, large_circle=False))
-        valids.append(self._is_tagent_points_valid(candidate_tangent_points[1], centers, dockzone_theta, large_circle=True))
+        valids.append(self._is_tangent_points_valid(candidate_tangent_points[0], centers, dockzone_theta, large_circle=False))
+        valids.append(self._is_tangent_points_valid(candidate_tangent_points[1], centers, dockzone_theta, large_circle=True))
         if np.sum(valids) == 0: return [None]*(len(centers)-1), centers, radii, modes
         if np.sum(valids) == 2: print('Warning: There are 2 valid tangent points. I did not anticipate this case.')
         if valids[0]:
@@ -200,7 +372,7 @@ class DubinsDockZonePathPlanner:
             modes = modes[:2] + [modes[3], modes[2]]
         return tangent_points, centers, radii, modes
 
-    def _is_tagent_points_valid(self, tangent_points: List[ArrayLike], centers: List[ArrayLike], dockzone_theta:float, large_circle=True) -> bool:
+    def _is_tangent_points_valid(self, tangent_points: List[ArrayLike], centers: List[ArrayLike], dockzone_theta:float, large_circle=True) -> bool:
         tangent_point = tangent_points[1]
         if not np.any(tangent_point): return False
         # BUG: When two circles are very close.
@@ -597,8 +769,100 @@ def utest_widget():
 
     plt.show()
 
+
+def collision_check(waypoints:ArrayLike, dockzone_circle:DockZoneNotchedCircle, collision_distance:float, collision_azimuth:float):
+    waypoints_x = waypoints[0]
+    waypoints_y = waypoints[1]
+    distances = np.linalg.norm(np.asarray((waypoints_x, waypoints_y)) - np.asarray([dockzone_circle.x, dockzone_circle.y]).reshape(-1,1), axis=0)
+    thetas = np.arctan2(waypoints_y - dockzone_circle.y, waypoints_x - dockzone_circle.x)
+    idx = np.where(distances < collision_distance)
+    if np.sum(np.abs(Spatializer.wrapToPi(thetas[idx] - dockzone_circle.theta) ) > collision_azimuth) > 0:
+        return False
+    return True
+
+
+def test_collision_free_check():
+    target_pose = np.asarray([0., 0., 0.])
+    dockzone_circle = get_dockzone_notched_circle(target_pose)
+    ref_dockzone_circle = get_dockzone_notched_circle(np.zeros(3))
+    start_pose = np.asarray([1, 0.2, -np.pi/2])
+    path_planner = DubinsDockZonePathPlanner()
+    path_planner.collision_distance = 0.25 
+    path_planner.collision_azimuth = np.pi/3
+    fig, ax = plt.subplots(dpi = 100)
+    ax.set_aspect('equal', 'box')
+    ax.set_xlim([-3,3])
+    ax.set_ylim([-3,3])
+    dockzone_circle_path, = ax.plot(*circle_around_pose_notched(target_pose), 'k:', linewidth=1.0)
+    thetas = np.linspace(-np.pi, np.pi, 100)
+    collision_circles = ( path_planner.collision_distance*np.cos(thetas) , path_planner.collision_distance*np.sin(thetas) )
+    collision_circle_path, = ax.plot(*collision_circles, 'r:', linewidth=2.0)
+    idx = np.where(np.abs(Spatializer.wrapToPi(thetas - dockzone_circle.theta)) < path_planner.collision_azimuth)
+    opening = (np.concatenate(([target_pose[0]],collision_circles[0][idx], [target_pose[0]] )),
+               np.concatenate(([target_pose[1]],collision_circles[1][idx], [target_pose[1]] )) )
+    opening_path, = ax.plot(*opening, 'g-', linewidth=5.0, alpha=0.5)
+    path = path_planner(start_pose, ref_dockzone_circle)
+    path_line, = ax.plot(*path.path_waypoints, 'b--', linewidth=1.0)
+    tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
+    tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
+    path_keypoints, = ax.plot(tangent_points_x, tangent_points_y, 'ko', markersize=3)
+
+    # add widget slider for target_pose[2], path_planner.collision_distance, path_planner.collision_azimuth
+    target_pose_slider_ax = fig.add_axes([0.2, 0.98, 0.2, 0.01])
+    collision_distance_slider_ax = fig.add_axes([0.2, 0.95, 0.2, 0.01])
+    collision_azimuth_slider_ax = fig.add_axes([0.2, 0.92, 0.2, 0.01])
+    bat_x_slider_ax = fig.add_axes([0.2, 0.89, 0.2, 0.01])
+    bat_y_slider_ax = fig.add_axes([0.2, 0.86, 0.2, 0.01])
+    bat_theta_slider_ax = fig.add_axes([0.2, 0.83, 0.2, 0.01])
+
+    target_pose_slider = widgets.Slider(target_pose_slider_ax, '\u03B8_target', -180, 180, valstep=0.1, valinit=np.degrees(target_pose[2]))
+    collision_distance_slider = widgets.Slider(collision_distance_slider_ax, 'collision_distance', 0.05, 0.5, valstep=0.01, valinit=path_planner.collision_distance)
+    collision_azimuth_slider = widgets.Slider(collision_azimuth_slider_ax, 'collision_azimuth', 0, 180, valstep=0.1, valinit=np.degrees(path_planner.collision_azimuth))
+    bat_x_slider = widgets.Slider(bat_x_slider_ax, 'x_bat', -1, 1, valstep=0.01, valinit=start_pose[0])
+    bat_y_slider = widgets.Slider(bat_y_slider_ax, 'y_bat', -1, 1, valstep=0.01, valinit=start_pose[1])
+    bat_theta_slider = widgets.Slider(bat_theta_slider_ax, '\u03B8_bat', -180, 180, valstep=0.1, valinit=np.degrees(start_pose[2]))
+
+
+    def update(val):
+        start_pose = np.asarray([bat_x_slider.val, bat_y_slider.val, np.radians(bat_theta_slider.val)])
+        target_pose[2] = np.radians(target_pose_slider.val)
+        dockzone_circle = get_dockzone_notched_circle(target_pose)
+        path_planner.collision_distance = collision_distance_slider.val
+        path_planner.collision_azimuth = np.radians(collision_azimuth_slider.val)
+        dockzone_circle_path.set_data(*circle_around_pose_notched(target_pose))
+        thetas = Spatializer.wrapToPi(np.linspace(-np.pi + dockzone_circle.theta, np.pi + dockzone_circle.theta, 100))
+        idx = np.where(np.abs(Spatializer.wrapToPi(thetas - dockzone_circle.theta)) < path_planner.collision_azimuth)
+        collision_circles = ( path_planner.collision_distance*np.cos(thetas) , path_planner.collision_distance*np.sin(thetas) )
+        collision_circle_path.set_data(*collision_circles)
+        opening = (np.concatenate(([target_pose[0]],collision_circles[0][idx], [target_pose[0]] )),
+                   np.concatenate(([target_pose[1]],collision_circles[1][idx], [target_pose[1]] )) )
+        opening_path.set_data(*opening)
+        path = path_planner(start_pose, ref_dockzone_circle)
+        path_line.set_data(*path.path_waypoints)
+        tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
+        tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
+        path_keypoints.set_xdata(tangent_points_x)
+        path_keypoints.set_ydata(tangent_points_y)
+        #path = path_planner(start_pose, dockzone_circle)
+        #if collision_check(path.path_waypoints, dockzone_circle, path_planner.collision_distance, path_planner.collision_azimuth):
+        if path_planner._collision_free_check(path, dockzone_circle):
+            path_line.set_color('b')
+        else:
+            path_line.set_color('r')
+        fig.canvas.draw_idle()
+
+    target_pose_slider.on_changed(update)
+    collision_distance_slider.on_changed(update)
+    collision_azimuth_slider.on_changed(update)
+    bat_x_slider.on_changed(update)
+    bat_y_slider.on_changed(update)
+    bat_theta_slider.on_changed(update)
+
+    plt.show()
+
 def main():
     return utest_widget()
+    #return test_collision_free_check()
 
 if __name__ == '__main__':
     main()
