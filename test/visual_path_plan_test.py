@@ -41,7 +41,7 @@ from Perception.flower_pose_estimator import NaiveOneShotFlowerPoseEstimator, On
 FLOWER_ARROW_LENGTH = 0.2
 BAT_ARROW_LENGTH = 0.3
 
-DOCKZONE_RADIUS = 0.7
+DOCKZONE_RADIUS = 0.6
 MIN_TURNING_RADIUS = 0.1
 
 FONT = {'size': 10}
@@ -604,7 +604,7 @@ def utest_widget():
     render = Spatializer.Render()
     render.compression_filter = Spatializer.Compressing.Downsample512()
     pose_estimators = {'naive': select_pose_estimator('Naive'), 'onset': select_pose_estimator('Onset'), 'twoshot': select_pose_estimator('TwoShot')}
-    for estimator in pose_estimators.values(): estimator.presence_detector.detection_threshold = 4.
+    for estimator in pose_estimators.values(): estimator.presence_detector.detection_threshold = 400.
     path_planer = DubinsDockZonePathPlanner()
     estimator_type = 'naive'
     compressed_distances = render.compression_filter(Setting.DISTANCE_ENCODING)
@@ -739,19 +739,33 @@ def utest_widget():
 
         dockzone = get_dockzone_notched_circle(est_flower_pose)
         path = path_planer(bat_pose, dockzone)
-        d = np.linalg.norm(path.centers[2] - path.centers[0])
-        if d < np.abs(path.radii[0]-path.radii[2]): path_line.set_visible(False)
-        else: path_line.set_visible(True)
-
-        path_line.set_data(*path.path_waypoints)
-        for i in range(len(path.centers)):
-            if i==1: continue
-            centers_x = [path.centers[i][0]]
-            centers_y = [path.centers[i][1]]
-        tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
-        tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
-        path_keypoints.set_xdata(centers_x + tangent_points_x)
-        path_keypoints.set_ydata(centers_y + tangent_points_y)
+        if path is not None:
+            path_line.set_visible(True)
+            path_keypoints.set_visible(True)
+            path_line.set_data(*path.path_waypoints)
+            for i in range(len(path.centers)):
+                if path.modes[i]=='S': continue
+                centers_x = [path.centers[i][0]]
+                centers_y = [path.centers[i][1]]
+            tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
+            tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
+            path_keypoints.set_xdata(centers_x + tangent_points_x)
+            path_keypoints.set_ydata(centers_y + tangent_points_y)
+        else:
+            path_line.set_visible(False)
+            path_keypoints.set_visible(False)
+        # d = np.linalg.norm(path.centers[2] - path.centers[0])
+        # if d < np.abs(path.radii[0]-path.radii[2]): path_line.set_visible(False)
+        # else: path_line.set_visible(True)
+        # path_line.set_data(*path.path_waypoints)
+        # for i in range(len(path.centers)):
+        #     if i==1: continue
+        #     centers_x = [path.centers[i][0]]
+        #     centers_y = [path.centers[i][1]]
+        # tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
+        # tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
+        # path_keypoints.set_xdata(centers_x + tangent_points_x)
+        # path_keypoints.set_ydata(centers_y + tangent_points_y)
         flower0_est_arrow.set_data(x=est_flower_pose[0], y=est_flower_pose[1],
                 dx=FLOWER_ARROW_LENGTH*np.cos(est_flower_pose[2]),
                 dy=FLOWER_ARROW_LENGTH*np.sin(est_flower_pose[2]))
@@ -860,9 +874,190 @@ def test_collision_free_check():
 
     plt.show()
 
+
+def utest_widget2():
+    import TrajectoryHandler
+    from TrajectoryHandler.dubinspath import DubinsDockZonePathPlanner
+    from TrajectoryHandler.dockzone import generate_dockzone_notched_circle_waypoints, get_dockzone_notched_circle_from_flower_pose
+
+    matplotlib.rc('font', **FONT)
+    render = Spatializer.Render()
+    render.compression_filter = Spatializer.Compressing.Downsample512()
+    pose_estimators = {'naive': select_pose_estimator('Naive'), 'onset': select_pose_estimator('Onset'), 'twoshot': select_pose_estimator('TwoShot')}
+    for estimator in pose_estimators.values(): estimator.presence_detector.detection_threshold = 400.
+    path_planer = DubinsDockZonePathPlanner()
+    estimator_type = 'naive'
+    compressed_distances = render.compression_filter(Setting.DISTANCE_ENCODING)
+    bat_pose = np.asarray([0., 0., 0.])
+    init_flowers_pose = [
+        [-1.5, -1.5, 0., 3.],
+        [1.5, -1.5, 0., 3.],
+        [1.5, 1.5, 0., 3.],
+        [-1.5, 1.5, 0., 3.],
+    ]
+    cartesian_objects_matrix = np.asarray(init_flowers_pose).astype(np.float32)
+    render.run(bat_pose, cartesian_objects_matrix)
+    inputs = np.concatenate([render.compress_left, render.compress_right]).reshape(1,2,-1)
+    prediction = pose_estimators[estimator_type](inputs)
+    fig = plt.figure(figsize=(12, 6), dpi=200)
+    gs = GridSpec(10, 10, figure=fig)
+    ax1 = fig.add_subplot(gs[:,:4])
+    ax2 = fig.add_subplot(gs[:4,5:])
+    ax3 = fig.add_subplot(gs[6:,5:])
+    bat_arrow = ax1.arrow(bat_pose[0], bat_pose[1],
+            BAT_ARROW_LENGTH*np.cos(bat_pose[2]), BAT_ARROW_LENGTH*np.sin(bat_pose[2]),
+            width=0.05, head_width=0.1, head_length=0.05, fc='k', ec='k')
+    if prediction[0]:
+        est_flower_pose = convert_polar_to_cartesian(bat_pose, prediction[0], prediction[1], prediction[2])
+    else: est_flower_pose = cartesian_objects_matrix[0,:3]
+    flower0_est_arrow = ax1.arrow(est_flower_pose[0], est_flower_pose[1],
+            FLOWER_ARROW_LENGTH*np.cos(est_flower_pose[2]), FLOWER_ARROW_LENGTH*np.sin(est_flower_pose[2]),
+            width=0.1, head_width=0.1, head_length=0.05, fc='r', ec='r', alpha=0.5)
+    flowers_arrows = []
+    for i in range(len(cartesian_objects_matrix)):
+        flowers_arrows.append(ax1.arrow(cartesian_objects_matrix[i,0], cartesian_objects_matrix[i,1],
+                FLOWER_ARROW_LENGTH*np.cos(cartesian_objects_matrix[i,2]), FLOWER_ARROW_LENGTH*np.sin(cartesian_objects_matrix[i,2]),
+                width=0.05, head_width=0.1, head_length=0.05, fc='m', ec='m'))
+    dockzone = get_dockzone_notched_circle_from_flower_pose(est_flower_pose)
+    dockzone_circle, = ax1.plot(*generate_dockzone_notched_circle_waypoints(dockzone), 'k:', linewidth=1.0, alpha=0.5)
+    path = path_planer(bat_pose, dockzone)
+    path_line, = ax1.plot(*path.path_waypoints, 'b--', linewidth=1.0, alpha=0.5)
+    for i in range(len(path.centers)):
+        if i==1: continue
+        centers_x = [path.centers[i][0]]
+        centers_y = [path.centers[i][1]]
+    tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
+    tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
+    path_keypoints, = ax1.plot(centers_x + tangent_points_x, centers_y + tangent_points_y, 'kx', markersize=5, alpha=0.5)
+    ax1.set_xlim([-3,3])
+    ax1.set_ylim([-3,3])
+    
+    ax1.set_aspect('equal', 'box')
+    ax1.set_xlabel('x (m)')
+    ax1.set_ylabel('y (m)')
+    ax1.legend([bat_arrow, flower0_est_arrow, flowers_arrows[0]], ['Bat', 'Flower (Est)', 'Flower (GT)'],
+               loc = 'upper left', bbox_to_anchor=(0., 1.25))
+
+    envelope_left_, envelope_right_, ax2 = set_up_waveform_plot(ax2,
+            compressed_distances, render.compress_left, render.compress_right, title='Echo envelope of the scene')
+    inputs_left_, inputs_right_, ax3 = set_up_waveform_plot(ax3,
+            compressed_distances,
+            pose_estimators[estimator_type].cache['inputs'][0,0,:],
+            pose_estimators[estimator_type].cache['inputs'][0,1,:], title='Inputs to the estimator')
+    
+    ax2.plot(compressed_distances, pose_estimators[estimator_type].presence_detector.profile*5, 'k--', linewidth=0.5, alpha=0.5)
+    ax3.plot(compressed_distances, pose_estimators[estimator_type].presence_detector.profile, 'k--', linewidth=0.5, alpha=0.5)
+
+
+    fig.subplots_adjust(left=.2, right=0.9)
+    
+    bat_slider_ax = []
+    for i in range(len(bat_pose)):
+        bat_slider_ax.append(fig.add_axes([0.2, 0.98 - i*0.03, 0.2, 0.01]) ) # x,y,theta
+    flowers_checkbox_ax = fig.add_axes([ 0.92, 0.05, 0.05, 0.5 ])
+    estimator_type_radio_ax = fig.add_axes([ 0.92, 0.6, 0.05, 0.2 ])
+    flowers_slider_ax = []
+    for i in range(len(init_flowers_pose)):
+        flowers_slider_ax.append(fig.add_axes([0.02, 0.05 + i*(0.6/len(init_flowers_pose)+0.08), 0.01, 0.6/len(init_flowers_pose)]))
+        flowers_slider_ax.append(fig.add_axes([0.06, 0.05 + i*(0.6/len(init_flowers_pose)+0.08), 0.01, 0.6/len(init_flowers_pose)]))
+        flowers_slider_ax.append(fig.add_axes([0.10, 0.05 + i*(0.6/len(init_flowers_pose)+0.08), 0.01, 0.6/len(init_flowers_pose)]))
+
+    bat_slider = []
+    bat_slider.append(widgets.Slider(bat_slider_ax[0], 'x_bat', -1., 1., valstep=0.01, valinit=bat_pose[0]))
+    bat_slider.append(widgets.Slider(bat_slider_ax[1], 'y_bat', -1., 1., valstep=0.01, valinit=bat_pose[1]))
+    bat_slider.append(widgets.Slider(bat_slider_ax[2], '\u03B8_bat', -180, 180, valstep=0.1, valinit=np.degrees(bat_pose[2])))
+    
+    flowers_slider = []
+    for i in range(len(init_flowers_pose)):
+        flowers_slider.append(widgets.Slider(flowers_slider_ax[i*3], f'\u0394x{i}', -1, 1, valstep=0.01, valinit=0., orientation='vertical') )
+        flowers_slider.append(widgets.Slider(flowers_slider_ax[i*3+1], f'\u0394y{i}', -1, 1, valstep=0.01, valinit=0., orientation='vertical') )
+        flowers_slider.append(widgets.Slider(flowers_slider_ax[i*3+2], f'\u0394\u03B8{i}', -180, 180, valstep=0.1, valinit=0., orientation='vertical') )
+    flowers_checkbox_txt = []
+    for i in range(len(init_flowers_pose)): flowers_checkbox_txt.append(f'F{i}')
+    flowers_checkbox = widgets.CheckButtons(flowers_checkbox_ax, flowers_checkbox_txt, [True]*len(init_flowers_pose))
+    estimator_type_radio = widgets.RadioButtons(estimator_type_radio_ax, ['naive', 'onset', 'twoshot'], active=0)
+
+
+
+    def update(val):
+        flower_status = flowers_checkbox.get_status()
+        estimator_type = estimator_type_radio.value_selected
+        bat_pose = np.asarray([
+            bat_slider[0].val, bat_slider[1].val, np.radians(bat_slider[2].val)
+        ]).astype(np.float32)
+        for i in range(len(cartesian_objects_matrix)):
+            cartesian_objects_matrix[i,0] = init_flowers_pose[i][0] + flowers_slider[i*3].val if flower_status[i] else -100.
+            cartesian_objects_matrix[i,1] = init_flowers_pose[i][1] + flowers_slider[i*3+1].val if flower_status[i] else -0.
+            cartesian_objects_matrix[i,2] = np.radians(flowers_slider[i*3+2].val) if flower_status[i] else 0.
+        render.run(bat_pose, cartesian_objects_matrix)
+        inputs = np.concatenate([render.compress_left, render.compress_right]).reshape(1,2,-1)
+        prediction = pose_estimators[estimator_type](inputs)
+        # if prediction[0]:
+        #     print('gt orientation: {:.2f}'.format(np.degrees( render.viewer.filtered_objects_inview_polar[0,2] )))
+        #     print('pred orientation: {:.2f}'.format(np.degrees(prediction[2])))
+        if render.viewer.collision_status==True:
+            bat_arrow.set_color('r')
+            bat_pose = np.copy(render.viewer.bat_pose)
+        else:
+            bat_arrow.set_color('k')
+        if prediction[0]:
+            est_flower_pose = convert_polar_to_cartesian(bat_pose, prediction[0], prediction[1], prediction[2])
+            flower0_est_arrow.set_color('r')
+        else:
+            est_flower_pose = cartesian_objects_matrix[0,:3]
+            flower0_est_arrow.set_color('k')
+        bat_arrow.set_data(x=bat_pose[0], y=bat_pose[1],
+                dx=BAT_ARROW_LENGTH*np.cos(bat_pose[2]),
+                dy=BAT_ARROW_LENGTH*np.sin(bat_pose[2]))
+        for i in range(len(cartesian_objects_matrix)):
+            flowers_arrows[i].set_data(x=cartesian_objects_matrix[i,0], y=cartesian_objects_matrix[i,1],
+                dx=FLOWER_ARROW_LENGTH*np.cos(cartesian_objects_matrix[i,2]),
+                dy=FLOWER_ARROW_LENGTH*np.sin(cartesian_objects_matrix[i,2]))
+            flowers_arrows[i].set_visible(flower_status[i])
+            for w in range(3): flowers_slider_ax[i*3 + w].set_visible(flower_status[i])
+
+        dockzone = get_dockzone_notched_circle_from_flower_pose(est_flower_pose)
+        path = path_planer(bat_pose, dockzone)
+        if path.cost<np.inf:
+            path_line.set_visible(True)
+            path_keypoints.set_visible(True)
+            path_line.set_data(*path.path_waypoints)
+            for i in range(len(path.centers)):
+                if path.modes[i]=='S': continue
+                centers_x = [path.centers[i][0]]
+                centers_y = [path.centers[i][1]]
+            tangent_points_x = [path.tangent_points[i][0] for i in range(len(path.tangent_points))]
+            tangent_points_y = [path.tangent_points[i][1] for i in range(len(path.tangent_points))]
+            path_keypoints.set_xdata(centers_x + tangent_points_x)
+            path_keypoints.set_ydata(centers_y + tangent_points_y)
+        else:
+            path_line.set_visible(False)
+            path_keypoints.set_visible(False)
+
+        flower0_est_arrow.set_data(x=est_flower_pose[0], y=est_flower_pose[1],
+                dx=FLOWER_ARROW_LENGTH*np.cos(est_flower_pose[2]),
+                dy=FLOWER_ARROW_LENGTH*np.sin(est_flower_pose[2]))
+        envelope_left_.set_ydata(render.compress_left)
+        envelope_right_.set_ydata(render.compress_right)
+        inputs_left_.set_ydata(pose_estimators[estimator_type].cache['inputs'][0,0,:])
+        inputs_right_.set_ydata(pose_estimators[estimator_type].cache['inputs'][0,1,:])
+        
+        dockzone_circle.set_data(*generate_dockzone_notched_circle_waypoints(dockzone))
+        
+        fig.canvas.draw_idle()
+
+    flowers_checkbox.on_clicked(update)
+    estimator_type_radio.on_clicked(update)
+    for slider in bat_slider+flowers_slider: slider.on_changed(update)
+
+    plt.show()
+
+
+
 def main():
     return utest_widget()
     #return test_collision_free_check()
+    #return utest_widget2()
 
 if __name__ == '__main__':
     main()

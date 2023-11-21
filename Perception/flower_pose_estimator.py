@@ -152,6 +152,7 @@ class OnsetOneShotFlowerPoseEstimator(PerceptionBase):
         # check whether something is presence prior to pose estimation
         if self.check_presence: 
             if not self.presence_detector(x):
+                if self.cache_inputs: self.cache['inputs'] = np.zeros((1,2,TransformConfig.ENVELOPE_LENGTH))
                 return None, None, None
         onset_distance_idx = self.onset_distance_detector(x, ouput_index=True)
         left_wave_package_boundaries = find_wave_package_of_given_index(self.transform(x[0,0,:]), onset_distance_idx)
@@ -235,6 +236,7 @@ class TwoShotFlowerPoseEstimator(PerceptionBase):
         # check whether something is presence prior to pose estimation
         if self.check_presence: 
             if not self.presence_detector(x):
+                if self.cache_inputs: self.cache['inputs'] = np.zeros((1,2,TransformConfig.ENVELOPE_LENGTH))
                 return None, None, None
         ############################################################
         # First shot
