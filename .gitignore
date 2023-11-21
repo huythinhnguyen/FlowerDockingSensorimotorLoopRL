@@ -2,6 +2,9 @@
 Dataset/
 saved_models/
 test/saved_models*
+ml_experiments/datasets/*
+ml_experiments/models/*
+ml_experiments/notebooks/*
 
 # Editors
 .vscode/

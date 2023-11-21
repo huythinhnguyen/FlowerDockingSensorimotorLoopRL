@@ -4,6 +4,8 @@ import sys
 import os
 import numpy as np
 
+import logging
+
 
 REPO_NAME = 'FlowerDockingSensorimotorLoopRL'
 REPO_PATH = os.path.abspath(__file__)
@@ -102,16 +104,22 @@ class OrientationalRetriever:
         # find index of the first non-zero and the last non-zero of the snippet
         start_index = np.argmax(snippet != 0)
         end_index = snippet.shape[0] - np.argmax(snippet[::-1] != 0) - 1
-        from_dist_array = np.arange(start_index, end_index+1) \
-            * 0.5 * (1/AcousticSetting.SAMPLE_FREQ) * AcousticSetting.SPEED_OF_SOUND
 
         orignal_distance_index = np.searchsorted(DISTANCE_ENCODING, original_distance, side='right') - 1
         target_distance_index = np.searchsorted(DISTANCE_ENCODING, target_distance, side='right') - 1
         diff_index = target_distance_index - orignal_distance_index
+
+        # This is to catch the case of negative and zeros values in the to_dist_array.
+        if start_index+diff_index <0: start_index = 1 - diff_index
+
+        from_dist_array = np.arange(start_index, end_index+1) \
+            * 0.5 * (1/AcousticSetting.SAMPLE_FREQ) * AcousticSetting.SPEED_OF_SOUND
+
         to_dist_array = np.arange(start_index+diff_index,end_index+diff_index+1) \
             * 0.5 * (1/AcousticSetting.SAMPLE_FREQ) * AcousticSetting.SPEED_OF_SOUND
 
         atmospheric = np.power(10, AcousticSetting.AIR_ABSORPTION*2*(original_distance - target_distance)/20)
+        
         spreading = np.divide(from_dist_array , to_dist_array) \
             ** (AcousticSetting.OUTWARD_SPREAD + AcousticSetting.INWARD_SPREAD)
         attenuation = atmospheric * spreading
@@ -366,15 +374,20 @@ class RenderBase:
 
 
 class Render(RenderBase):
-    def __init__(self, mode:AnyStr='compress', cache_dict:Dict=dict(),):
+    def __init__(self, mode:AnyStr='compress', cache_dict:Dict=dict(),
+                 retriever_kwargs:Dict=dict(),
+                 viewer_kwargs:Dict=dict(),
+                 compress_kwargs:Dict=dict(),
+                 cochlea_kwargs:Dict=dict(),
+                 ):
         super().__init__(cache_dict=cache_dict)
         if mode not in ['compress', 'envelope', 'waveform']: 
             raise ValueError('mode must be one of compress, envelope, or waveform')
         self.render_mode = mode
-        self.fetch = OrientationalRetriever()
-        self.viewer = Viewer.FieldOfView()
-        self.compression_filter = Compressing.Subsample()
-        self.cochlea_filter = Cochlea.CochleaFilter()
+        self.fetch = OrientationalRetriever(**retriever_kwargs)
+        self.viewer = Viewer.FieldOfView(**viewer_kwargs)
+        self.compression_filter = Compressing.Subsample(**compress_kwargs)
+        self.cochlea_filter = Cochlea.CochleaFilter(**cochlea_kwargs)
 
     def run(self, bat_pose: ArrayLike, cartesian_objects_matrix: ArrayLike,):
         if type(cartesian_objects_matrix)==list: cartesian_objects_matrix = np.asarray(cartesian_objects_matrix).reshape(-1,4)
@@ -398,7 +411,7 @@ class Render(RenderBase):
         if self.render_mode == 'compress': return self.cache_dict['compress']
         return Warning(f'No render mode {self.render_mode} found. Return the waveform instead.\n \
                        Access Render.cache_dict[`waveform`] to get the waveform.')
-    
+
 
 class UniformRetrierver:
     def __init__(self):

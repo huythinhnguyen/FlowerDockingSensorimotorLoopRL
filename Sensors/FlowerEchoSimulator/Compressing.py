@@ -7,6 +7,19 @@ import numpy as np
 from .Setting import CompressionSetting as Setting
 
 
+class Downsample512:
+    def __init__(self):
+        self.kernel_size = 13
+        self.stride = 13
+        self.number_of_samples = 512
+    
+    def transform(self,data):
+        return np.mean(data[:self.number_of_samples*self.kernel_size].reshape(-1,self.kernel_size), axis=1)
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        return self.transform(*args, **kwds)
+
+
 class Subsample:
     def __init__(self, n_sample=Setting.N_SAMPLE, quiet_threshold=Setting.QUIET_THRESHOLD,
                  truncate=0, normalized=Setting.NORMALIZED): # n_sample=140

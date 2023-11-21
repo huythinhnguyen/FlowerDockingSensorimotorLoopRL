@@ -52,6 +52,7 @@ class FlowerDataConfig:
 class ViewerSetting:
     #OLD VERSION  ||| FOV_LINEAR: float = 3. ||| FOV_ANGULAR: float = np.pi*(7/9)
     FOVS = [(1., np.radians(110)*2), (4., np.radians(90)*2)] #[(1., np.radians(110)*2), (4., np.radians(90)*2)])
+    COLLISION_THRESHOLD: float = 0.15
     FOV_OBSCURING: bool = False # NOT IMPLEMENTED YET IN THIS VERSION
     
 
