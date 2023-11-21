@@ -283,3 +283,53 @@ class DubinsDockZonePathPlanner:
                 else: quantities.append( -1*((alpha-beta)%(2*np.pi)) )
         #print(modes, quantities, len(centers), len(tangent_points))
         return quantities
+    
+
+class DubinsToKinematics:
+    def __init__(self, **kwargs):
+        self.nominal_linear_velocity = kwargs.get('nominal_linear_velocity', BatKinematicParams.SHARP_TURN_VELOCITY)
+        self.update_rate = kwargs.get('update_rate', BatKinematicParams.CHIRP_RATE)
+        #self.centrifugal_acceleration = kwargs.get('centrifugal_acceleration', BatKinematicParams.CENTRIFUGAL_ACCELERATION)
+        self.min_path_points = 10
+
+    def __call__(self, *args, **kwargs):
+        return self.run(*args, **kwargs)
+    
+    def run(self, path: DubinsParams, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        # return linear velocity and angular velocity arrays to follow the path.
+        if path.cost == np.inf: return self._no_path_found_solution(**kwargs)
+        v, w = np.asarray([]).astype(float), np.asarray([]).astype(float)
+        for mode, quantity, radius in zip(path.modes, path.quantities, radius):
+            new_v, new_w = self.solve_for_segment_kinematics(mode, quantity, radius)
+            v = np.concatenate((v, new_v))
+            w = np.concatenate((w, new_w))
+        return v, w
+    
+    def solve_for_segment_kinematics(self, mode: str, quantity: float, radius: float) -> Tuple[ArrayLike, ArrayLike]:
+        if mode == 'S': return self._solve_for_straight_segment_kinematics(quantity, self.nominal_linear_velocity, self.update_rate)
+        if mode == 'L': return self._solve_for_curve_segment_kinematics(quantity, self.nominal_linear_velocity, self.update_rate, radius)
+        if mode == 'R':
+            v, w = self._solve_for_curve_segment_kinematics(quantity, self.nominal_linear_velocity, self.update_rate, radius)
+            return v, -w
+
+    def _solve_for_straight_segment_kinematics(quantity: float,
+                                               nominal_linear_velocity: float,
+                                               update_rate: int, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        n_points = int(quantity * update_rate / nominal_linear_velocity)
+        new_velocity = quantity * update_rate / n_points
+        return np.ones(n_points)*new_velocity, np.zeros(n_points)
+
+    def _solve_for_curve_segment_kinematics(quantity: float,
+                                                nominal_linear_velocity: float,
+                                                update_rate: int,
+                                                turn_radius: float, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        nominal_angular_velocity = nominal_linear_velocity / turn_radius
+        n_points = int(quantity * update_rate / nominal_angular_velocity)
+        new_angular_velocity = quantity * update_rate / n_points
+        new_linear_velocity = new_angular_velocity * turn_radius
+        return np.ones(n_points)*new_linear_velocity, np.ones(n_points)*new_angular_velocity
+
+    def _no_path_found_solution(self, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        return np.ones(self.min_path_points)*self.nominal_linear_velocity, np.zeros(self.min_path_points)
+    
+     
