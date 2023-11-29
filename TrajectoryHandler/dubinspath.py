@@ -7,6 +7,8 @@ from .dockzone import DockZoneNotchedCircle, get_dockzone_notched_circle_from_fl
 
 from Sensors.FlowerEchoSimulator.Spatializer import wrapToPi
 
+import warnings
+
 
 class DubinsParams:
     def __init__(self, **kwargs):
@@ -374,17 +376,34 @@ class DubinsToKinematics:
                 new_velocity = accel_v_array[-1] if len(accel_v_array)>0 else init_v
                 k = int(np.ceil(left_over_distance * update_rate / new_velocity))
                 new_a = (left_over_distance*update_rate - new_velocity*k) * 2 * update_rate / (k*(k+1))
-                #print('new_a', new_a)
+                #print('new_a1', new_a)
             v_array = np.concatenate((accel_v_array, new_velocity + np.arange(1,k+1)*(new_a/update_rate)))
         else:
             # could not reach norminal velocity during accel,
             # adjust the accel_v_array so that the accel_distance = quantity.
-            accel_distance_cumsum = np.cumsum(accel_v_array/update_rate)
-            k = np.argmax(accel_distance_cumsum >= np.abs(quantity)) + 1
-            new_a = (np.abs(quantity)*update_rate - init_v*k) * 2 * update_rate / (k*(k+1))
-            v_array = np.concatenate((np.ones(1)*init_v, init_v + np.arange(1,k+1)*(new_a/update_rate)))
+            if init_v < nominal_linear_velocity:
+                # k needs to meet the condition: quantity - k*init_v/update_rate >= 0 for accel, aka, new_a > 0
+                # --> k <= quantity * update_rate / init_v
+                # k = np.argmax(cumsum > np.abs(quantity)) + 1 is always smaller than the above condition.
+                cumsum = np.cumsum(accel_v_array/update_rate)
+                k = np.argmax(cumsum > np.abs(quantity)) + 1
+            else:
+                # k needs to meet the condition: quantity - k*init_v/update_rate <= 0 for decel, aka, new_a < 0
+                # --> k >= quantity * update_rate / init_v
+                k = int(np.ceil(quantity * update_rate / init_v))
+            if k<2:
+                new_v = np.abs(quantity) * update_rate
+                #print('k={}'.format(k))
+                if new_v - init_v > self.acceleration_limit * update_rate or new_v - init_v < self.deceleration_limit * update_rate:
+                    warnings.warn('Cannot reach the desired velocity. Return the max velocity.')
+                    new_v = init_v + self.acceleration_limit * update_rate if new_v - init_v > self.acceleration_limit * update_rate else init_v + self.deceleration_limit * update_rate
+                return np.ones(1)*new_v, np.zeros(1)
+            new_a = (quantity*update_rate - init_v*k) * 2 * update_rate / (k*(k+1))
+            #print('new_a2', new_a)
+            v_array = init_v + np.arange(1,k+1)*(new_a/update_rate)
         #print('actual', quantity)
         #print('recovery distance', np.sum(v_array/update_rate))
+        #print('accel limit = {}, decel limit = {}'.format(self.acceleration_limit, self.deceleration_limit))
         return v_array, np.zeros(len(v_array))
 
     def _solve_for_curve_segment_kinematics(self, quantity: float,
@@ -400,7 +419,7 @@ class DubinsToKinematics:
     def _get_accelerated_linear_velocity_array(self, init_v: ArrayLike, final_v: ArrayLike, update_rate: int, **kwargs) -> ArrayLike:
         accel = self.acceleration_limit if init_v < final_v else self.deceleration_limit
         k = int(np.ceil((final_v - init_v)*update_rate / accel))
-        v_array = init_v + np.arange(k+1)*accel/update_rate
+        v_array = init_v + np.arange(1, k+1)*accel/update_rate
         v_array[-1] = final_v
         return v_array
         

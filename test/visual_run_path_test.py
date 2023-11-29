@@ -376,16 +376,17 @@ def utest1():
 
 def dummy_test_1():
     from TrajectoryHandler.dubinspath import DubinsParams
-    path = DubinsParams(modes = ['L','S','R','S','L','L','L'],
-                        radii=[0.1, np.inf, 0.1, np.inf, 0.1, 0.6, 0.3],
-                        quantities=[0.5*np.pi, 0.1, -0.5*np.pi, 0.2, 0.5*np.pi, 0.5*np.pi, 0.5*np.pi],
-                        cost = 1.)
+    init_v = 0. if len(sys.argv) == 1 else float(sys.argv[1])
+    # path = DubinsParams(modes = ['L','S','R','S','L','L','L'],
+    #                     radii=[0.1, np.inf, 0.1, np.inf, 0.1, 0.6, 0.3],
+    #                     quantities=[*np.pi, 0.2, -0.5*np.pi, 0.2, 0.5*np.pi, 0.5*np.pi, 0.5*np.pi],
+    #                     cost = 1.)
     #path = DubinsParams(modes = ['S'], radii=[np.inf], quantities=[.0001,], cost = 1.)
-    #path = DubinsParams(modes = ['L'], radii=[1.], quantities=[1.5*np.pi], cost = 1.)
+    path = DubinsParams(modes = ['L'], radii=[.2], quantities=[.15*np.pi], cost = 1.)
     kinematic_converter1 = DubinsToKinematicsNoAccel()
     kinematic_converter2 = DubinsToKinematics()
     v_seq1, w_seq1, = kinematic_converter1(path)
-    v_seq2, w_seq2 = kinematic_converter2(path)
+    v_seq2, w_seq2 = kinematic_converter2(path, init_v=init_v)
     update_rate = BatKinematicParams.CHIRP_RATE
     bat_pose = np.asarray([0., 0., np.radians(45)])
     trajectories1, v_rec1, w_rec1 = run_kinematic_sequence(bat_pose, v_seq1, w_seq1)
@@ -416,8 +417,8 @@ def dummy_test_1():
 
 
 def main():
-    return utest1()
-    #return dummy_test_1()
+    #return utest1()
+    return dummy_test_1()
 
 if __name__=='__main__':
     main()
