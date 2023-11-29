@@ -64,6 +64,7 @@ class State:
         kinematic = self._limit_acceleartion(kinematic)
         kinematic = self._limit_velocity(kinematic)
         self.kinematic = np.asarray(kinematic).astype(np.float32).reshape(2,)
+        self.previous_kinematics = np.copy(self.kinematic)
         return self.kinematic
     
     def _limit_acceleartion(self, kinematic: ArrayLike):
