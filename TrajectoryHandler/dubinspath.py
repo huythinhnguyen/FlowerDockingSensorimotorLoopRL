@@ -2,10 +2,12 @@ from typing import List, Tuple
 from numpy.typing import ArrayLike
 import numpy as np
 
-from .settings import DockZoneParams, BatKinematicParams
+from .settings import DockZoneParams, BatKinematicParams, OtherKinematicParams
 from .dockzone import DockZoneNotchedCircle, get_dockzone_notched_circle_from_flower_pose
 
 from Sensors.FlowerEchoSimulator.Spatializer import wrapToPi
+
+import warnings
 
 
 class DubinsParams:
@@ -283,3 +285,149 @@ class DubinsDockZonePathPlanner:
                 else: quantities.append( -1*((alpha-beta)%(2*np.pi)) )
         #print(modes, quantities, len(centers), len(tangent_points))
         return quantities
+    
+
+class DubinsToKinematicsNoAccel:
+    def __init__(self, **kwargs):
+        self.nominal_linear_velocity = kwargs.get('nominal_linear_velocity', BatKinematicParams.SHARP_TURN_VELOCITY)
+        self.update_rate = kwargs.get('update_rate', BatKinematicParams.CHIRP_RATE)
+        #self.centrifugal_acceleration = kwargs.get('centrifugal_acceleration', BatKinematicParams.CENTRIFUGAL_ACCELERATION)
+        self.min_path_points = 10
+
+    def __call__(self, *args, **kwargs):
+        return self.run(*args, **kwargs)
+    
+    def run(self, path: DubinsParams, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        # return linear velocity and angular velocity arrays to follow the path.
+        if path.cost == np.inf: return self._no_path_found_solution(**kwargs)
+        v, w = np.asarray([]).astype(float), np.asarray([]).astype(float)
+        for mode, quantity, radius in zip(path.modes, path.quantities, path.radii):
+            new_v, new_w = self.solve_for_segment_kinematics(mode, quantity, radius)
+            v = np.concatenate((v, new_v))
+            w = np.concatenate((w, new_w))
+        return v, w
+    
+    def solve_for_segment_kinematics(self, mode: str, quantity: float, radius: float) -> Tuple[ArrayLike, ArrayLike]:
+        if mode == 'S': return DubinsToKinematicsNoAccel._solve_for_straight_segment_kinematics(quantity, self.nominal_linear_velocity, self.update_rate)
+        else: return DubinsToKinematicsNoAccel._solve_for_curve_segment_kinematics(quantity, self.nominal_linear_velocity, self.update_rate, radius)
+
+
+    def _solve_for_straight_segment_kinematics(quantity: float,
+                                               nominal_linear_velocity: float,
+                                               update_rate: int, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        n_points = int(np.ceil(quantity * update_rate / nominal_linear_velocity))
+        new_velocity = quantity * update_rate / n_points
+        return np.ones(n_points)*new_velocity, np.zeros(n_points)
+
+    def _solve_for_curve_segment_kinematics(quantity: float,
+                                                nominal_linear_velocity: float,
+                                                update_rate: int,
+                                                turn_radius: float, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        nominal_angular_velocity = nominal_linear_velocity / turn_radius
+        n_points = int(np.ceil(np.abs(quantity) * update_rate / nominal_angular_velocity))
+        new_angular_velocity = np.abs(quantity) * update_rate / n_points
+        new_linear_velocity = new_angular_velocity * turn_radius
+        return np.ones(n_points)*new_linear_velocity, np.sign( quantity )*np.ones(n_points)*new_angular_velocity
+
+    def _no_path_found_solution(self, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        return np.ones(self.min_path_points)*self.nominal_linear_velocity, np.zeros(self.min_path_points)
+    
+
+class DubinsToKinematics:
+    def __init__(self, **kwargs):
+        self.nominal_linear_velocity = kwargs.get('nominal_linear_velocity', BatKinematicParams.SHARP_TURN_VELOCITY)
+        self.update_rate = kwargs.get('update_rate', BatKinematicParams.CHIRP_RATE)
+        #self.centrifugal_acceleration = kwargs.get('centrifugal_acceleration', BatKinematicParams.CENTRIFUGAL_ACCELERATION)
+        self.acceleration_limit = kwargs.get('acceleration_limit', OtherKinematicParams.LINEAR_ACCEL_LIMIT)
+        self.deceleration_limit = kwargs.get('deceleration_limit', OtherKinematicParams.LINEAR_DECEL_LIMIT)
+        self.min_path_points = 10
+        self.segments_len = None
+
+    def __call__(self, *args, **kwargs):
+        return self.run(*args, **kwargs)
+    
+    def run(self, path: DubinsParams, init_v: float = 0., **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        self.segments_len = []
+        # return linear velocity and angular velocity arrays to follow the path.
+        if path.cost == np.inf:
+            self.segments_len.append(self.min_path_points)
+            return self._no_path_found_solution(**kwargs)
+        v, w = np.asarray([]).astype(float), np.asarray([]).astype(float)
+        for mode, quantity, radius in zip(path.modes, path.quantities, path.radii):
+            new_v, new_w = self.solve_for_segment_kinematics(mode, quantity, radius, init_v)
+            init_v = new_v[-1]
+            v = np.concatenate((v, new_v))
+            w = np.concatenate((w, new_w))
+            self.segments_len.append(len(new_v))
+        return v, w
+    
+    def solve_for_segment_kinematics(self, mode: str, quantity: float, radius: float, init_v: float,) -> Tuple[ArrayLike, ArrayLike]:
+        if mode == 'S': return self._solve_for_straight_segment_kinematics(quantity, self.nominal_linear_velocity, self.update_rate, init_v=init_v)
+        else: return self._solve_for_curve_segment_kinematics(quantity, self.nominal_linear_velocity, self.update_rate, radius, init_v=init_v)
+
+    def _solve_for_straight_segment_kinematics(self, quantity: float,
+                                               nominal_linear_velocity: float,
+                                               update_rate: int,
+                                               init_v: float, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        accel_v_array = self._get_accelerated_linear_velocity_array(init_v, nominal_linear_velocity, update_rate)
+        accel_distance = np.sum(accel_v_array/update_rate)
+        new_a = np.inf
+        if accel_distance < np.abs(quantity):
+            accel_v_array = np.concatenate((accel_v_array, np.ones(1)*nominal_linear_velocity))
+            while new_a > self.acceleration_limit or new_a < self.deceleration_limit:
+                accel_v_array = accel_v_array[:-1]
+                accel_distance = np.sum(accel_v_array/update_rate)
+                left_over_distance = np.abs(quantity) - accel_distance
+                new_velocity = accel_v_array[-1] if len(accel_v_array)>0 else init_v
+                k = int(np.ceil(left_over_distance * update_rate / new_velocity))
+                new_a = (left_over_distance*update_rate - new_velocity*k) * 2 * update_rate / (k*(k+1))
+                #print('new_a1', new_a)
+            v_array = np.concatenate((accel_v_array, new_velocity + np.arange(1,k+1)*(new_a/update_rate)))
+        else:
+            # could not reach norminal velocity during accel,
+            # adjust the accel_v_array so that the accel_distance = quantity.
+            if init_v < nominal_linear_velocity:
+                # k needs to meet the condition: quantity - k*init_v/update_rate >= 0 for accel, aka, new_a > 0
+                # --> k <= quantity * update_rate / init_v
+                # k = np.argmax(cumsum > np.abs(quantity)) + 1 is always smaller than the above condition.
+                cumsum = np.cumsum(accel_v_array/update_rate)
+                k = np.argmax(cumsum > np.abs(quantity)) + 1
+            else:
+                # k needs to meet the condition: quantity - k*init_v/update_rate <= 0 for decel, aka, new_a < 0
+                # --> k >= quantity * update_rate / init_v
+                k = int(np.ceil(quantity * update_rate / init_v))
+            if k<2:
+                new_v = np.abs(quantity) * update_rate
+                #print('k={}'.format(k))
+                if new_v - init_v > self.acceleration_limit * update_rate or new_v - init_v < self.deceleration_limit * update_rate:
+                    warnings.warn('Cannot reach the desired velocity. Return the max velocity.')
+                    new_v = init_v + self.acceleration_limit * update_rate if new_v - init_v > self.acceleration_limit * update_rate else init_v + self.deceleration_limit * update_rate
+                return np.ones(1)*new_v, np.zeros(1)
+            new_a = (quantity*update_rate - init_v*k) * 2 * update_rate / (k*(k+1))
+            #print('new_a2', new_a)
+            v_array = init_v + np.arange(1,k+1)*(new_a/update_rate)
+        #print('actual', quantity)
+        #print('recovery distance', np.sum(v_array/update_rate))
+        #print('accel limit = {}, decel limit = {}'.format(self.acceleration_limit, self.deceleration_limit))
+        return v_array, np.zeros(len(v_array))
+
+    def _solve_for_curve_segment_kinematics(self, quantity: float,
+                                                nominal_linear_velocity: float,
+                                                update_rate: int,
+                                                turn_radius: float,
+                                                init_v: float, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        linear_quantity = np.abs(quantity) * turn_radius
+        v_array, _ = self._solve_for_straight_segment_kinematics(linear_quantity, nominal_linear_velocity, update_rate, init_v)
+        new_w_array = np.sign(quantity) * v_array / turn_radius
+        return v_array, new_w_array
+    
+    def _get_accelerated_linear_velocity_array(self, init_v: ArrayLike, final_v: ArrayLike, update_rate: int, **kwargs) -> ArrayLike:
+        accel = self.acceleration_limit if init_v < final_v else self.deceleration_limit
+        k = int(np.ceil((final_v - init_v)*update_rate / accel))
+        v_array = init_v + np.arange(1, k+1)*accel/update_rate
+        v_array[-1] = final_v
+        return v_array
+        
+
+    def _no_path_found_solution(self, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        return np.ones(self.min_path_points)*self.nominal_linear_velocity, np.zeros(self.min_path_points)
