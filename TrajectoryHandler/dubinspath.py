@@ -341,19 +341,24 @@ class DubinsToKinematics:
         self.acceleration_limit = kwargs.get('acceleration_limit', OtherKinematicParams.LINEAR_ACCEL_LIMIT)
         self.deceleration_limit = kwargs.get('deceleration_limit', OtherKinematicParams.LINEAR_DECEL_LIMIT)
         self.min_path_points = 10
+        self.segments_len = None
 
     def __call__(self, *args, **kwargs):
         return self.run(*args, **kwargs)
     
     def run(self, path: DubinsParams, init_v: float = 0., **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        self.segments_len = []
         # return linear velocity and angular velocity arrays to follow the path.
-        if path.cost == np.inf: return self._no_path_found_solution(**kwargs)
+        if path.cost == np.inf:
+            self.segments_len.append(self.min_path_points)
+            return self._no_path_found_solution(**kwargs)
         v, w = np.asarray([]).astype(float), np.asarray([]).astype(float)
         for mode, quantity, radius in zip(path.modes, path.quantities, path.radii):
             new_v, new_w = self.solve_for_segment_kinematics(mode, quantity, radius, init_v)
             init_v = new_v[-1]
             v = np.concatenate((v, new_v))
             w = np.concatenate((w, new_w))
+            self.segments_len.append(len(new_v))
         return v, w
     
     def solve_for_segment_kinematics(self, mode: str, quantity: float, radius: float, init_v: float,) -> Tuple[ArrayLike, ArrayLike]:

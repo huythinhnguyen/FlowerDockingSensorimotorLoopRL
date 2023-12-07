@@ -11,7 +11,7 @@ GRAVI_ACCEL = 9.81
 class DockZoneParams:
     LARGE_CIRCLE_RADIUS: float = 0.6
     SMALL_CIRCLE_RADIUS: float = LARGE_CIRCLE_RADIUS / 2
-    COLLISION_DISTANCE: float = 0.2
+    COLLISION_DISTANCE: float = 0.25
     COLLISION_AZIMUTH: float = pi/3
     COLLISION_EPSILON: float = 1e-3
 
