@@ -20,7 +20,7 @@ BAT_HIT_ASSET_PATH = os.path.join(REPO_PATH, 'assets', 'bat_hit.png')
 FLOWER_ASSET_PATH = os.path.join(REPO_PATH, 'assets', 'flower.png')
 FLOWER_EST_ASSET_PATH = os.path.join(REPO_PATH, 'assets', 'flower_est.png')
 
-ASSET_SCALE = 0.07
+ASSET_SCALE = 0.09
 
 TRANSLATED_LABELS = {'left': 'izquierdo', 'right': 'derecho', 'waveform': 'Waveforms', 'envelope': 'Envelopes',
                      'distance': 'Distancia (m)',

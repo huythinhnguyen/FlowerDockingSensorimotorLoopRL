@@ -33,7 +33,7 @@ BAT_HIT_ASSET_PATH = os.path.join(REPO_PATH, 'assets', 'bat_hit.png')
 FLOWER_ASSET_PATH = os.path.join(REPO_PATH, 'assets', 'flower.png')
 FLOWER_EST_ASSET_PATH = os.path.join(REPO_PATH, 'assets', 'flower_est.png')
 
-ASSET_SCALE = 0.06
+ASSET_SCALE = 0.08
 
 TRANSLATED_LABELS = {'left': 'izquierdo', 'right': 'derecho', 'waveform': 'Waveforms', 'envelope': 'Envelopes',
                      'distance': 'Distancia (m)',
@@ -474,6 +474,7 @@ def mainapp():
             os.remove('result.pkl')
         sys.stdout.writelines('Running episode...                                          \r')
         # flower0_est_arrow.set_visible(False)
+        flower_est_artists[0].set_visible(False)
         dockzone_circle.set_visible(False)
         path_line.set_visible(False)
         # path_keypoints.set_visible(False)
@@ -514,6 +515,7 @@ def mainapp():
                 trajectories_dict = pickle.load(f)
         else: raise FileNotFoundError('result.pkl not found. Need to run episode first.')
         # flower0_est_arrow.set_visible(True)
+        flower_est_artists[0].set_visible(True)
         dockzone_circle.set_visible(True)
         path_line.set_visible(True) 
         # path_keypoints.set_visible(True)
@@ -537,6 +539,7 @@ def mainapp():
         if np.isnan(est_flower_pose[0]):
             dockzone_circle.set_visible(False)
             # flower0_est_arrow.set_visible(False)
+            flower_est_artists[0].set_visible(False)
             path_line.set_visible(False)
             # path_keypoints.set_visible(False)
             #print('There should not be any est flower arrow and dockzone circle nor path!!!!')
@@ -544,10 +547,12 @@ def mainapp():
             #print('predicted distance: {:.2f}'.format(estimated_distance))
             if np.isnan(estimated_distance):
                 # flower0_est_arrow.set_visible(False)
+                flower_est_artists[0].set_visible(False)
                 dockzone_circle.set_visible(False)
                 #print('There should not be any est flower arrow and dockzone circle!!!!')
             else:
                 # flower0_est_arrow.set_visible(True)
+                flower_est_artists[0].set_visible(True)
                 dockzone_circle.set_visible(True)
                 dockzone = get_dockzone_notched_circle_from_flower_pose(est_flower_pose)
                 #path = path_planner(bat_pose, dockzone)
@@ -578,6 +583,12 @@ def mainapp():
                 # flower0_est_arrow.set_data(x=est_flower_pose[0], y=est_flower_pose[1],
                 #         dx=FLOWER_ARROW_LENGTH*np.cos(est_flower_pose[2]),
                 #         dy=FLOWER_ARROW_LENGTH*np.sin(est_flower_pose[2]))
+                flower_est_artists[0].remove()
+                rotated_flower_est_asset = ndimage.rotate(flower_est_asset, np.degrees(est_flower_pose[2]))
+                flower_est_imgbox = OffsetImage(rotated_flower_est_asset, zoom=ASSET_SCALE)
+                flower_est_annobox = AnnotationBbox(flower_est_imgbox, (est_flower_pose[0], est_flower_pose[1]), frameon = False)
+                flower_est_artists[0] = ax1.add_artist(flower_est_annobox)
+                
                 dockzone_circle.set_data(*generate_dockzone_notched_circle_waypoints(dockzone))
         bat_trajectory_line.set_data(trajectories_dict['bat_trajectory'][:marker,0], trajectories_dict['bat_trajectory'][:marker,1])
         print('predicted distance: {:.2f}'.format(estimated_distance))
