@@ -22,8 +22,8 @@ FLOWER_EST_ASSET_PATH = os.path.join(REPO_PATH, 'assets', 'flower_est.png')
 
 ASSET_SCALE = 0.09
 
-TRANSLATED_LABELS = {'left': 'izquierdo', 'right': 'derecho', 'waveform': 'Waveforms', 'envelope': 'Envelopes',
-                     'distance': 'Distancia (m)',
+TRANSLATED_LABELS = {'left': 'left', 'right': 'right', 'waveform': 'Waveforms', 'envelope': 'Envelopes',
+                     'distance': 'Distance (m)',
 }
 
 def utest_render_1():

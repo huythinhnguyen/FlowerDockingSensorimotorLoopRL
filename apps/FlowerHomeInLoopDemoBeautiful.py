@@ -35,8 +35,8 @@ FLOWER_EST_ASSET_PATH = os.path.join(REPO_PATH, 'assets', 'flower_est.png')
 
 ASSET_SCALE = 0.08
 
-TRANSLATED_LABELS = {'left': 'izquierdo', 'right': 'derecho', 'waveform': 'Waveforms', 'envelope': 'Envelopes',
-                     'distance': 'Distancia (m)',
+TRANSLATED_LABELS = {'left': 'left', 'right': 'right', 'waveform': 'Waveforms', 'envelope': 'Envelopes',
+                     'distance': 'Distance (m)',
 }
 
 PRESENCE_DETECTION_THRESHOLD = 1.
@@ -330,7 +330,7 @@ def mainapp():
         flowers_slider.append(widgets.Slider(flowers_slider_ax[i*3+2], f'\u0394\u03B8{i}',
                                              -180, 180, valstep=0.1, valinit=np.degrees(init_flowers_pose[i,2]), orientation='vertical') )
     flowers_checkbox_txt = []
-    for i in range(len(init_flowers_pose)): flowers_checkbox_txt.append(f'Flora-{i}')
+    for i in range(len(init_flowers_pose)): flowers_checkbox_txt.append(f'Flower-{i}')
     flowers_checkbox = widgets.CheckButtons(flowers_checkbox_ax, flowers_checkbox_txt, [True]*len(init_flowers_pose))
     estimator_type_radio = widgets.RadioButtons(estimator_type_radio_ax, ['naive', 'onset', 'twoshot'], active=1)
     reset_button = widgets.Button(reset_button_ax, 'Reset')
