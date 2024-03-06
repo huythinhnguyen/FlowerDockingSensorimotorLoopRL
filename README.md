@@ -9,6 +9,19 @@ After downloading the file, please extract and place the `flower3x_snippet` fold
 
 Use the convenient script `install_dataset.sh` to set up the dataset if necessary.
 
+Download the model using the link https://mailuc-my.sharepoint.com/:u:/g/personal/nguye2t7_mail_uc_edu/Efglh8nBqSxHut-I05v9i14BmP93h0MoRDwuzxf-iTqCKw?e=nZEkuw
+Save the model into the `saved_models` folder as below. Make sure file name is accurate.
+```plaintext
+FlowerDockingSensorimotorLoopRL
+├── saved_models
+|   └── flower_pose_estimator_v1.pt
+├── Dataset
+|   ├── flower3x_snippet
+|   ├── emission_snippet.npz
+|   └── noise.npz
+...
+```
+
 ## Demo
 1. Visualize the waveforms bats experienced with a single band freq. 1 bat 1 flower in the scene.
 - run `python apps/VisualizerFlowerEcho.py`
