@@ -3,6 +3,7 @@ import os
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import Optional, Tuple, List, Dict, Any, Union, Callable
+import warnings
 
 
 REPO_NAME = 'FlowerDockingSensorimotorLoopRL'
@@ -19,7 +20,7 @@ from SensorimotorLoops.home_in_flower import HomeInFlower
 
 from TrajectoryHandler.dubinspath import DubinsDockZonePathPlanner, DubinsToKinematics, DubinsToKinematicsNoAccel, DubinsParams
 from TrajectoryHandler.dockzone import generate_dockzone_notched_circle_waypoints, get_dockzone_notched_circle_from_flower_pose
-from TrajectoryHandler.settings import BatKinematicParams, OtherKinematicParams
+from TrajectoryHandler.settings import BatKinematicParams, OtherKinematicParams, DockZoneParams
 
 
 FLOWER_DISTANCE_SETTINGS = {
@@ -29,10 +30,10 @@ FLOWER_DISTANCE_SETTINGS = {
 }
 
 BAT_AZIMUTH_RANGE: Tuple[float] = (-np.pi/3, np.pi/3)
-FLOWER_COLLISION_RADIUS: float = 0.25
-FLOWER_OPENING_ANGULAR_RANGE: Tuple[float] = (-np.pi/6, np.pi/6)
-BAT_FACING_ANGULAR_RANGE: Tuple[float] = (-np.pi/3, np.pi/3)
-ARENA_LIM: Dict[Tuple[float]] = {'x': (-1., 4.), 'y': (-1., 4.)}
+FLOWER_COLLISION_RADIUS: float = 0.22
+FLOWER_OPENING_ANGULAR_RANGE: Tuple[float] = (-4*np.pi/18, 4*np.pi/18)
+BAT_FACING_ANGULAR_RANGE: Tuple[float] = (-7*np.pi/18, 7*np.pi/18)
+ARENA_LIM = {'x': (-1., 4.), 'y': (-2.5, 2.5)}
 N_TRIAL: int = 1_000
 
 INIT_VELOCITY: float = 0.
@@ -60,7 +61,7 @@ def collision_check(bat_pose: ArrayLike, objects: ArrayLike,
     return False
 
 def check_out_of_arena(bat_pose: ArrayLike,
-                       arena_lim: Dict[Tuple[float]] = ARENA_LIM) -> bool:
+                       arena_lim = ARENA_LIM) -> bool:
     if not (arena_lim['x'][0] <= bat_pose[0] <= arena_lim['x'][1]):
         return True
     if not (arena_lim['y'][0] <= bat_pose[1] <= arena_lim['y'][1]):
@@ -102,14 +103,30 @@ def check_docking(bat_pose: ArrayLike, flower_pose: ArrayLike,
         return False
 
 def calculate_optimal_path_length(bat_pose: ArrayLike, flower_pose: ArrayLike) -> float:
+    theta = np.pi - 2*np.arccos(FLOWER_COLLISION_RADIUS/2*DockZoneParams.SMALL_CIRCLE_RADIUS)
+    
     path_planner = DubinsDockZonePathPlanner()
     dockzone = get_dockzone_notched_circle_from_flower_pose(flower_pose)
     path = path_planner(bat_pose, dockzone)
+
+    if np.abs(path.quantities[-1]) > theta and path.modes[-1]!='S':
+        return path.cost - theta*DockZoneParams.SMALL_CIRCLE_RADIUS
+    if path.modes[-2]=='S' and path.modes[-1]!='S':
+        phi = path.quantities[-1]
+        b = DockZoneParams.SMALL_CIRCLE_RADIUS
+        a = FLOWER_COLLISION_RADIUS
+        c = b*(1-np.cos(phi))/np.cos(phi)
+        y = np.sqrt((b+c)**2 - b**2)
+        h = c*np.cos(phi)
+        d = np.sqrt(a**2 - h**2) + np.sqrt(c**2 - h**2)
+        x = d - y
+        return path.cost - phi*DockZoneParams.SMALL_CIRCLE_RADIUS - x
+    warnings.warn('The optimal path length is not calculated correctly.')
     return path.cost
 
 
 def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
-                timeout = 10) -> Dict[str, Any]:
+                timeout = 10, track_bat_pose = False) -> Dict[str, Any]:
     # return a dictionary of the trial result.
     # bat_pose: (x,y,theta)
     # flower_pose: (x,y,theta)
@@ -153,12 +170,14 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
                   max_angular_acceleration=BatKinematicParams.MAX_ANGULAR_ACCELERATION*1,
                   max_linear_deceleration=OtherKinematicParams.LINEAR_DECEL_LIMIT,
                   )
-    objects = np.hstack([flower_pose, 3.]).astype(np.float32)
-    control_loop = HomeInFlower(pose_estimator=OnsetOneShotFlowerPoseEstimator() )
+    objects = np.hstack([flower_pose, 3.]).astype(np.float32).reshape(1,4)
+    control_loop = HomeInFlower(pose_estimator=OnsetOneShotFlowerPoseEstimator(),
+                                init_v=INIT_VELOCITY, caching=True)
     distance_traveled = 0.
+    if track_bat_pose: bat_poses = [state.pose]
     while not collision_check(state.pose, np.array([flower_pose])):
         if check_out_of_arena(state.pose): break
-        envelope_left, envelope_right = render(state.pose, objects)
+        envelope_left, envelope_right = render(state.pose, objects).values()
         control_loop.init_v = state.kinematic[0]
         vs, ws = control_loop(envelope_left, envelope_right)
         if control_loop.cache['prediction'][0]:
@@ -170,6 +189,7 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
         for v, w in zip(vs, ws):
             state(v=v, w=w)
             distance_traveled += state.kinematic[0]*state.dt
+            if track_bat_pose: bat_poses.append(state.pose)
             if collision_check(state.pose, objects):
                 angle_of_arrival = get_angle_of_arrival(state.pose, flower_pose)
                 azimuth_of_flower = get_azimuth_of_flower(state.pose, flower_pose)
@@ -181,26 +201,61 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
                 result['final_leading_bat_pose'] = leading_bat_pose
                 result['final_estimated_flower_pose'] = est_flower_pose
                 result['ending_bat_pose'] = state.pose
-
-                envelope_left, envelope_right = render(state.pose, objects)
-                control_loop(envelope_left, envelope_right)
                 result['travel_distance'] = distance_traveled
-                result['ending_estimated_flower_pose'] = convert_polar_to_cartesian(state.pose, *control_loop.cache['prediction'])
+                envelope_left, envelope_right = render(state.pose, objects).values()
+                control_loop(envelope_left, envelope_right)
+                if control_loop.cache['prediction'][0]:
+                    result['ending_estimated_flower_pose'] = convert_polar_to_cartesian(state.pose, *control_loop.cache['prediction'])
                 break
-
+    if track_bat_pose: result['bat_poses'] = np.asarray(bat_poses)
     return result
 
-def test2():
-    pass
+def test2(bat_angle_degree, flower_angle_degree, distance_setting):
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyArrowPatch
+    bat_init_pose = np.array([0., 0., np.radians(bat_angle_degree)])
+    flower_pose = np.array([FLOWER_DISTANCE_SETTINGS[distance_setting], 0., np.radians(flower_angle_degree)])
+    result = run_1_trial(bat_init_pose, flower_pose, track_bat_pose=True)
+    fig, ax = plt.subplots()
+    ax.set_xlim(ARENA_LIM['x'][0], ARENA_LIM['x'][1])
+    ax.set_ylim(ARENA_LIM['y'][0], ARENA_LIM['y'][1])
+    ax.set_aspect('equal')
+    ax.grid(True)
+    if result['outcomes'] == 'dock' or result['outcomes'] == 'hit':
+        bat_end_arrow = FancyArrowPatch((result['ending_bat_pose'][0], result['ending_bat_pose'][1]),
+                                    (result['ending_bat_pose'][0]+0.3*np.cos(result['ending_bat_pose'][2]),
+                                     result['ending_bat_pose'][1]+0.3*np.sin(result['ending_bat_pose'][2])),
+                                arrowstyle='simple', mutation_scale=10, color='blue', alpha=0.5)
+        ax.add_patch(bat_end_arrow)
+    bat_arrow = FancyArrowPatch((result['init_bat_pose'][0], result['init_bat_pose'][1]),
+                            (result['init_bat_pose'][0]+0.3*np.cos(result['init_bat_pose'][2]),
+                                result['init_bat_pose'][1]+0.3*np.sin(result['init_bat_pose'][2])),
+                            arrowstyle='simple', mutation_scale=10, color='black', alpha=0.5)
+    
+    flower_arrow = FancyArrowPatch((result['init_flower_pose'][0], result['init_flower_pose'][1]),
+                                (result['init_flower_pose'][0]+0.3*np.cos(result['init_flower_pose'][2]),
+                                result['init_flower_pose'][1]+0.3*np.sin(result['init_flower_pose'][2])),
+                                arrowstyle='simple', mutation_scale=20, color='magenta', alpha=0.3)
+    bat_trajectory_line = ax.plot(result['bat_poses'][:,0], result['bat_poses'][:,1], color='blue', alpha=0.5)
+    ax.add_patch(bat_arrow)
+    ax.add_patch(flower_arrow)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.text(ARENA_LIM['x'][1]+0.1, ARENA_LIM['y'][1]-0.5,
+            'ending=' + result['outcomes'], ha='left', va='center', fontsize=10)
+    aoa = np.round(np.degrees(result['angle_of_arrival']), 1)
+    ax.text(ARENA_LIM['x'][1]+0.1, ARENA_LIM['y'][1]-0.8,
+            'aoa={}'.format(aoa), ha='left', va='center', fontsize=10)
+    print((result['travel_distance'])/result['optimal_path_length'])
+    plt.show()
 
-def run(distance_setting: str):
-    print(sys.argv)
-    print('distance_setting:', distance_setting)
-
+def test3(bat_angle_degree, flower_angle_degree, distance_setting):
+    for i in range(5):
+        test2(bat_angle_degree, flower_angle_degree, distance_setting)
 
 def main():
-    #return run(sys.argv[1])
-    return test2()
+    # return test2(float(sys.argv[1]), float(sys.argv[2]), sys.argv[3])
+    return test3(float(sys.argv[1]), float(sys.argv[2]), sys.argv[3])
 
 if __name__=='__main__':
     main()

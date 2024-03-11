@@ -33,7 +33,7 @@ class LogDecayProfile:
 
 @dataclass
 class PresenceDetectorConfig:
-    DETECTION_THRESHOLD: float = 2.
+    DETECTION_THRESHOLD: float = 1.
     GAIN: float = 1. # Multiplier for presence score prior to applying detection threshold
     SCORE_MODE = 'sum' # 'sum' or 'max'
 

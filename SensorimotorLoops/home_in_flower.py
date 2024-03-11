@@ -52,24 +52,41 @@ class HomeInFlower:
         return self.step(*args, **kwargs)
     
     # TODO: This works OK but not perfect.
-    def get_execution_steps(self, prediction: Tuple[float], segments_len: List[int], path: DubinsParams) -> int:
+    # def get_execution_steps(self, prediction: Tuple[float], segments_len: List[int], path: DubinsParams) -> int:
+    #     # This is a catch all for no found path.
+    #     if len(segments_len) < 2: return 1
+    #     # If prediction is far away, just a portion of the path so that I can get closer towards the flower.
+    #     if prediction[0] > 1.5:
+    #         tt = 0.5 if prediction[0] > 2.5 else (.5-1.)/(2.5-1.5)*(prediction[0]-1.5) + 1.
+    #         return segments_len[0] + int(segments_len[1] * tt)
+    #     # when the prediction is closer, I will try to orient myself in front of the flower without finish.
+    #     if prediction[0] > DockZoneParams.COLLISION_DISTANCE*1.5: #or np.abs(prediction[1]) > np.radians(45):
+    #         if np.abs(path.quantities[-1]) < np.pi/2:
+    #             tt = np.abs(path.quantities[-1])/np.pi + 0.5
+    #             return sum(segments_len[:-2]) + int(segments_len[-2]*tt) 
+    #         else:
+    #             tt = 0.5 if path.quantities[-1] > np.pi else np.abs(path.quantities[-1])/np.pi - 0.5
+    #             return sum(segments_len[:-1]) + int(segments_len[-1] * tt)
+    #     # when the prediction is really close, and the azimuth of the prediction is small, continuously re-estimate pose.
+    #     return 2
+    
+    def get_execution_steps(self, prediction: Tuple[float], segments_len: List[int], path: DubinsParams,
+                            distance_threshold_1: float = 1.2, distance_threshold_2: float = 0.5) -> int:
         # This is a catch all for no found path.
         if len(segments_len) < 2: return 1
-        # If prediction is far away, just a portion of the path so that I can get closer towards the flower.
-        if prediction[0] > 1.5:
-            tt = 0.5 if prediction[0] > 2.5 else (.5-1.)/(2.5-1.5)*(prediction[0]-1.5) + 1.
-            return segments_len[0] + int(segments_len[1] * tt)
-        # when the prediction is closer, I will try to orient myself in front of the flower without finish.
-        if prediction[0] > DockZoneParams.COLLISION_DISTANCE*1.5: #or np.abs(prediction[1]) > np.radians(45):
+        # If the flower is far away, execute the initial portion to get closer to the flower.
+        if prediction[0] > distance_threshold_1:
+            return segments_len[0] + int(segments_len[1] * 0.5)
+        # If the flower is close, execute all except of portions of the last segment --> bring bat to the front of the flower
+        if prediction[0] > distance_threshold_2:
             if np.abs(path.quantities[-1]) < np.pi/2:
-                tt = np.abs(path.quantities[-1])/np.pi + 0.5
-                return sum(segments_len[:-2]) + int(segments_len[-2]*tt) 
+                return sum(segments_len[:-2]) + 1
             else:
-                tt = 0.5 if path.quantities[-1] > np.pi else np.abs(path.quantities[-1])/np.pi - 0.5
-                return sum(segments_len[:-1]) + int(segments_len[-1] * tt)
-        # when the prediction is really close, and the azimuth of the prediction is small, continuously re-estimate pose.
-        return 2
-    
+                return sum(segments_len[:-1]) + int(segments_len[-1] * 0.5) + 1
+        # If the flower is really close, continuously re-estimate pose.
+        return 1
+
+
     def random_walk_course_plan(self, turn_sharpness: float = 1., *args, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
         direction = np.random.choice(['L', 'R'])
         path = DubinsParams(modes=[direction], radii=[self.random_walk_turning_radius/turn_sharpness],

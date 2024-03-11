@@ -424,6 +424,7 @@ class DubinsToKinematics:
     def _get_accelerated_linear_velocity_array(self, init_v: ArrayLike, final_v: ArrayLike, update_rate: int, **kwargs) -> ArrayLike:
         accel = self.acceleration_limit if init_v < final_v else self.deceleration_limit
         k = int(np.ceil((final_v - init_v)*update_rate / accel))
+        if k < 2: return np.ones(1)*final_v
         v_array = init_v + np.arange(1, k+1)*accel/update_rate
         v_array[-1] = final_v
         return v_array
