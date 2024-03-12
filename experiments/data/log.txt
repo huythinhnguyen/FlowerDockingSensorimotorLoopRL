@@ -12,10 +12,10 @@ FLOWER_COLLISION_RADIUS: float = 0.22
 FLOWER_OPENING_ANGULAR_RANGE: Tuple[float] = (-4*np.pi/18, 4*np.pi/18)
 BAT_FACING_ANGULAR_RANGE: Tuple[float] = (-7*np.pi/18, 7*np.pi/18)
 ARENA_LIM = {'x': (-1., 4.), 'y': (-2.5, 2.5)}
-N_TRIAL: int = 1_000
+N_TRIAL: int = 5_000
 
 INIT_VELOCITY: float = 0.
 --------------------------------------------------
-DATE: 2024-03-11:
+DATE: 2024-03-12:
 Code is ready for collection.
-- First Trial: 2024-03-11 ~ 11PM close distance.
+- First Trial: 2024-03-12 ~ 12AM close far distance.

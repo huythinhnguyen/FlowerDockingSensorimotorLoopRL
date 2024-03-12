@@ -5,7 +5,7 @@ test/saved_models*
 ml_experiments/datasets/*
 ml_experiments/models/*
 ml_experiments/notebooks/*
-experiments/data/exp*/*
+#experiments/data/exp*/*
 
 
 # Editors

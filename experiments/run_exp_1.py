@@ -35,7 +35,7 @@ FLOWER_COLLISION_RADIUS: float = 0.22
 FLOWER_OPENING_ANGULAR_RANGE: Tuple[float] = (-4*np.pi/18, 4*np.pi/18)
 BAT_FACING_ANGULAR_RANGE: Tuple[float] = (-7*np.pi/18, 7*np.pi/18)
 ARENA_LIM = {'x': (-1., 4.), 'y': (-2.5, 2.5)}
-N_TRIAL: int = 1_000
+N_TRIAL: int = 5_000
 
 INIT_VELOCITY: float = 0.
 
@@ -302,6 +302,9 @@ def run(num_trial, distance_setting,
 def main():
     # return test2(float(sys.argv[1]), float(sys.argv[2]), sys.argv[3])
     # return test3(float(sys.argv[1]), float(sys.argv[2]), sys.argv[3])
+    if len(sys.argv) > 2:
+        overwrite = True if sys.argv[2] in ['ow', 'overwrite'] else False
+    else: overwrite = False
     return run(N_TRIAL, sys.argv[1])
 
 if __name__=='__main__':
