@@ -1,0 +1,21 @@
+EXP 1 
+--------------------------------------------------
+CONFIG:
+FLOWER_DISTANCE_SETTINGS = {
+    'close': 0.8, # meter
+    'mid':   1.6, # meter
+    'far':   2.4, # meter
+}
+
+BAT_AZIMUTH_RANGE: Tuple[float] = (-np.pi/3, np.pi/3)
+FLOWER_COLLISION_RADIUS: float = 0.22
+FLOWER_OPENING_ANGULAR_RANGE: Tuple[float] = (-4*np.pi/18, 4*np.pi/18)
+BAT_FACING_ANGULAR_RANGE: Tuple[float] = (-7*np.pi/18, 7*np.pi/18)
+ARENA_LIM = {'x': (-1., 4.), 'y': (-2.5, 2.5)}
+N_TRIAL: int = 1_000
+
+INIT_VELOCITY: float = 0.
+--------------------------------------------------
+DATE: 2024-03-11:
+Code is ready for collection.
+- First Trial: 2024-03-11 ~ 11PM close distance.

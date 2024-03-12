@@ -22,6 +22,7 @@ from TrajectoryHandler.dubinspath import DubinsDockZonePathPlanner, DubinsToKine
 from TrajectoryHandler.dockzone import generate_dockzone_notched_circle_waypoints, get_dockzone_notched_circle_from_flower_pose
 from TrajectoryHandler.settings import BatKinematicParams, OtherKinematicParams, DockZoneParams
 
+SAVE_DATA_PATH = os.path.join(REPO_PATH, 'experiments', 'data', 'exp_1')
 
 FLOWER_DISTANCE_SETTINGS = {
     'close': 0.8, # meter
@@ -253,9 +254,55 @@ def test3(bat_angle_degree, flower_angle_degree, distance_setting):
     for i in range(5):
         test2(bat_angle_degree, flower_angle_degree, distance_setting)
 
+
+def run(num_trial, distance_setting,
+        save_path = SAVE_DATA_PATH, save_overwrite = True, save_file_interval = 100):
+    import pandas as pd
+    if not os.path.exists(save_path): os.makedirs(save_path)
+    save_file = os.path.join(save_path, f'results_{distance_setting}.pkl')
+    # load save file if exists and save_overwrite is False
+    if os.path.exists(save_file) and not save_overwrite:
+        results = pd.read_pickle(save_file).to_dict(orient='list')
+    else:
+        results = {
+            'init_bat_pose': [],
+            'init_flower_pose': [],
+            'init_estimated_flower_pose': [],
+            'optimal_path_length': [],
+            'ending_bat_pose': [],
+            'ending_estimated_flower_pose': [],
+            'angle_of_arrival': [],
+            'ending_azimuth_of_flower': [],
+            'outcomes': [],
+            'travel_distance': [],
+            'final_leading_bat_pose': [],
+            'final_estimated_flower_pose': [],
+            'bat_poses': [],
+        }
+    for i in range(len(results['init_bat_pose']), num_trial):
+        bat_init_pose = np.array([0.,0.,
+            np.random.uniform(low=BAT_AZIMUTH_RANGE[0], high= BAT_AZIMUTH_RANGE[1])])
+        flower_pose = np.array([FLOWER_DISTANCE_SETTINGS[distance_setting], 0.,
+                np.random.uniform(-np.pi, np.pi)])
+        result = run_1_trial(bat_init_pose, flower_pose, track_bat_pose=True)
+        for key in results.keys():
+            results[key].append(result[key])
+        if i % save_file_interval == 0:
+            df = pd.DataFrame(results)
+            df.to_pickle(save_file)
+            print(f'{i} trials are saved.')
+    print(f'{num_trial} trials are completed.')
+    df = pd.DataFrame(results)
+    df.to_pickle(save_file)
+    print('All trials are saved.')
+    return None    
+
+
+
 def main():
     # return test2(float(sys.argv[1]), float(sys.argv[2]), sys.argv[3])
-    return test3(float(sys.argv[1]), float(sys.argv[2]), sys.argv[3])
+    # return test3(float(sys.argv[1]), float(sys.argv[2]), sys.argv[3])
+    return run(N_TRIAL, sys.argv[1])
 
 if __name__=='__main__':
     main()

@@ -17,6 +17,6 @@ Initialize flower pose `(x_flower0, y_flower0, theta_flower0)`:
 - Run `close` and `far` settigns first, `mid` is optional. Each setting run for 1000 trials.
 
 Endings:
-- Flower Collision Distance = 0.2 meter
+- Flower Collision Distance = 0.22 meter
 - Flower Dockzone: 60&deg;,  -30&deg; &rarr; 30&deg;.
 - Out-Zone: Bat xy should be within -1, 4.
