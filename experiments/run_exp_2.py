@@ -273,12 +273,17 @@ def run(num_trial, init_config_key: str,
     print('All trials are saved.')
     return None    
 
+def run_all_config(num_trial, keys, save_path = SAVE_DATA_PATH, save_overwrite = True, save_file_interval = 100):
+    for key in keys:
+        run(num_trial, key, save_path, save_overwrite, save_file_interval)
+    return None
 
 def main():
-    if len(sys.argv) > 2:
-        overwrite = True if sys.argv[2] in ['ow', 'overwrite'] else False
-    else: overwrite = False
-    return run(N_TRIAL, sys.argv[1], save_overwrite=overwrite, save_file_interval=100)
+    # if len(sys.argv) > 2:
+    #     overwrite = True if sys.argv[2] in ['ow', 'overwrite'] else False
+    # else: overwrite = False
+    # return run(N_TRIAL, sys.argv[1], save_overwrite=overwrite, save_file_interval=100)
+    return run_all_config(N_TRIAL, sys.argv[1:])
 
 if __name__=='__main__':
     main()
