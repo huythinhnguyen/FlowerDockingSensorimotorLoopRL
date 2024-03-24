@@ -143,6 +143,7 @@ class HomeInFlower:
             else:
                 self.v_course, self.w_course = self.random_walk_course_plan(turn_sharpness=1.)
                 execution_steps = len(self.v_course)
+                if self.caching: self.cache['use_random_walk'] = True
         
         if self.caching:
             self.cache['prediction'] = prediction
