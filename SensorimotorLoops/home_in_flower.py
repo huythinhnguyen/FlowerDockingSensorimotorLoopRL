@@ -112,6 +112,7 @@ class HomeInFlower:
 
     
     def step(self, compressed_envelop_left: ArrayLike, compressed_envelop_right: ArrayLike, **kwargs) -> Tuple[ArrayLike, ArrayLike]:
+        if self.caching: self.cache['use_random_walk'] = False
         # format inputs for pose_estimator
         model_inputs = np.concatenate([compressed_envelop_left, compressed_envelop_right]).reshape(1, 2, -1)
         prediction = self.pose_estimator(model_inputs)
