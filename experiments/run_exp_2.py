@@ -198,7 +198,7 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
             else: result['replan'].append(False)
             # record object presence
             temp_ = np.concatenate([envelope_left, envelope_right]).reshape(1, 2, -1)
-            if control_loop.presence_detector(temp_): result['object_presence'].append(True)
+            if control_loop.pose_estimator.presence_detector(temp_): result['object_presence'].append(True)
             else: result['object_presence'].append(False)
             # record estimated error
             result['est_err_trans'].append( np.linalg.norm(est_flower_pose[:2] - flower_pose[:2]) )
