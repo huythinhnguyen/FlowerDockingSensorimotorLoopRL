@@ -19,3 +19,34 @@ INIT_VELOCITY: float = 0.
 DATE: 2024-03-12:
 Code is ready for collection.
 - First Trial: 2024-03-12 ~ 12AM close far distance.
+
+--------------------------------------------------
+EXP 2
+--------------------------------------------------
+CONFIG:
+INIT_CONFIG = {
+    'A1' : {'bat_pose': np.array([0., 0., 0.]),
+            'flower_pose': np.array([1., 0., -np.pi]), } ,
+    'A2' : {'bat_pose': np.array([0., 0., np.pi*0.25]),
+            'flower_pose': np.array([1., 0., -np.pi]), } ,
+    'B1' : {'bat_pose': np.array([0., 0., 0.]),
+            'flower_pose': np.array([1., 0., np.pi*0.75]), } ,
+    'B2' : {'bat_pose': np.array([0., 0., np.pi*0.25]),
+            'flower_pose': np.array([1., 0., np.pi*0.75]), } ,
+    'B3' : {'bat_pose': np.array([0., 0., -np.pi*0.25]),
+            'flower_pose': np.array([1., 0., np.pi*0.75]), } ,
+}
+
+FLOWER_COLLISION_RADIUS: float = 0.22
+FLOWER_OPENING_ANGULAR_RANGE: Tuple[float] = (-4*np.pi/18, 4*np.pi/18)
+BAT_FACING_ANGULAR_RANGE: Tuple[float] = (-7*np.pi/18, 7*np.pi/18)
+ARENA_LIM = {'x': (-1., 4.), 'y': (-2.5, 2.5)}
+N_TRIAL: int = 200
+
+INIT_VELOCITY: float = 0.
+--------------------------------------------------
+DATE: 2024-03-24:
+Code is ready for collection.
+Collected 200 trials for each config.
+Data here: https://mailuc-my.sharepoint.com/:f:/g/personal/nguye2t7_mail_uc_edu/EhLuJH5_euhKm_ZReBw_1z0BstBamEuNXjmssYEUX6Uj3w?e=hodabT
+--> Link expired in 180 days. --> 2024-09-20
