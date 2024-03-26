@@ -41,7 +41,7 @@ FLOWER_COLLISION_RADIUS: float = 0.22
 FLOWER_OPENING_ANGULAR_RANGE: Tuple[float] = (-4*np.pi/18, 4*np.pi/18)
 BAT_FACING_ANGULAR_RANGE: Tuple[float] = (-7*np.pi/18, 7*np.pi/18)
 ARENA_LIM = {'x': (-1., 4.), 'y': (-2.5, 2.5)}
-N_TRIAL: int = 200
+N_TRIAL: int = 500
 
 INIT_VELOCITY: float = 0.
 
@@ -144,6 +144,8 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
         'use_random_walk': [],
         'use_prediction': [],
         'replan': [],
+        'course_number_of_steps': [],
+        'step_id_in_course_sequence': [],
         'est_err_trans': [],
         'est_err_rot': [],
         'linear_velocities': [],
@@ -182,6 +184,8 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
             # record envelope
             result['echoes_left'].append(envelope_left)
             result['echoes_right'].append(envelope_right)
+            result['course_number_of_steps'].append(len(vs))
+            result['step_id_in_course_sequence'].append(id)
             # record estimated flower pose
             if control_loop.cache['prediction'][0]:
                 est_flower_pose = convert_polar_to_cartesian(state.pose, *control_loop.cache['prediction'])
@@ -194,7 +198,7 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
             # record use_prediction
             result['use_prediction'].append(control_loop.cache['use_prediction'])
             # record replan
-            if id==0: result['replan'].append(True)
+            if id==0 and control_loop.cache['use_prediction']: result['replan'].append(True)
             else: result['replan'].append(False)
             # record object presence
             temp_ = np.concatenate([envelope_left, envelope_right]).reshape(1, 2, -1)
