@@ -80,7 +80,7 @@ class HomeInFlower:
         # If the flower is close, execute all except of portions of the last segment --> bring bat to the front of the flower
         if prediction[0] > distance_threshold_2:
             if np.abs(path.quantities[-1]) < np.pi/2:
-                return sum(segments_len[:-1]) + 1
+                return sum(segments_len[:-2]) + int(segments_len[-2] * 0.5) + 1
             else:
                 return sum(segments_len[:-1]) + int(segments_len[-1] * 0.5) + 1
         # If the flower is really close, continuously re-estimate pose.
