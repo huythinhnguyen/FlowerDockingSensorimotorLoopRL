@@ -48,5 +48,5 @@ INIT_VELOCITY: float = 0.
 DATE: 2024-03-24:
 Code is ready for collection.
 Collected 200 trials for each config.
-Data here: https://mailuc-my.sharepoint.com/:f:/g/personal/nguye2t7_mail_uc_edu/EhLuJH5_euhKm_ZReBw_1z0BstBamEuNXjmssYEUX6Uj3w?e=hodabT
---> Link expired in 180 days. --> 2024-09-20
+Data here: https://mailuc-my.sharepoint.com/:f:/g/personal/nguye2t7_mail_uc_edu/EmB9ESXF8KVOnhL25fsVGI8BWsrXk8h8Ihs71li8Czn_Qg?e=rD0LCb
+Link will expired on 09-22-2024.
