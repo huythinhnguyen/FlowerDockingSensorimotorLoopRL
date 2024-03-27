@@ -39,6 +39,7 @@ class HomeInFlower:
             else kwargs['pose_estimator'] if 'pose_estimator' in kwargs else select_pose_estimator() # convenient when need to feed in the pose_estimator.
         self.init_v = kwargs['init_v'] if 'init_v' in kwargs else 0.
         self.caching = kwargs['caching'] if 'caching' in kwargs else False
+        self.replan_every_step = kwargs['replan_every_step'] if 'replan_every_step' in kwargs else False
         self.distance_memory = deque(maxlen=DISTANCE_MEMORY_SIZE)
         self.v_course = np.asarray([]).astype(np.float32)
         self.w_course = np.asarray([]).astype(np.float32)
@@ -72,6 +73,7 @@ class HomeInFlower:
     
     def get_execution_steps(self, prediction: Tuple[float], segments_len: List[int], path: DubinsParams,
                             distance_threshold_1: float = 1.2, distance_threshold_2: float = 0.5) -> int:
+        if self.replan_every_step: return 1
         # This is a catch all for no found path.
         if len(segments_len) < 2: return 1
         # If the flower is far away, execute the initial portion to get closer to the flower.
