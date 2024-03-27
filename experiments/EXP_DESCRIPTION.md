@@ -57,8 +57,10 @@ What to collect? Enough to accurately reconstruct the each episodes?
     Matching with the re-planning steps, did I replan in a better place?***
     7. Misc tracking:
         1. Linear velocity, angular velocity
+        2. Use prediction (maybe not needed for 1 flower case but will be use full for 2 flower case)
 - For episode:
     1. Init bat pose, init flower pose
     2. angle of arrival, ending azimuth of flower
     3. outcome
     4. path length
+    5. optimal path length
