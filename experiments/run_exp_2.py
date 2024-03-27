@@ -41,7 +41,7 @@ FLOWER_COLLISION_RADIUS: float = 0.22
 FLOWER_OPENING_ANGULAR_RANGE: Tuple[float] = (-4*np.pi/18, 4*np.pi/18)
 BAT_FACING_ANGULAR_RANGE: Tuple[float] = (-7*np.pi/18, 7*np.pi/18)
 ARENA_LIM = {'x': (-1., 4.), 'y': (-2.5, 2.5)}
-N_TRIAL: int = 500
+N_TRIAL: int = 200
 
 INIT_VELOCITY: float = 0.
 
@@ -172,12 +172,12 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
     control_loop = HomeInFlower(pose_estimator=OnsetOneShotFlowerPoseEstimator(),
                                 init_v=INIT_VELOCITY, caching=True)
     distance_traveled = 0.
-    model_prediction = control_loop.cache['prediction']
     while not collision_check(state.pose, np.array([flower_pose])):
         if check_out_of_arena(state.pose): break
         envelope_left, envelope_right = render(state.pose, objects).values()
         control_loop.init_v = state.kinematic[0]
         vs, ws = control_loop(envelope_left, envelope_right)
+        model_prediction = control_loop.cache['prediction']
         for id, (v, w) in enumerate(zip(vs, ws)):
             # starting recording
             # record bat pose
@@ -188,7 +188,7 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
             result['course_number_of_steps'].append(len(vs))
             result['step_id_in_course_sequence'].append(id)
             # record estimated flower pose
-            if control_loop.cache['prediction'][0]:
+            if model_prediction[0]:
                 est_flower_pose = convert_polar_to_cartesian(state.pose, *model_prediction)
             else: est_flower_pose = np.array([np.nan, np.nan, np.nan])
             if np.any(np.isnan(est_flower_pose)):
