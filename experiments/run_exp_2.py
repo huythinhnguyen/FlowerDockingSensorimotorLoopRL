@@ -172,6 +172,7 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
     control_loop = HomeInFlower(pose_estimator=OnsetOneShotFlowerPoseEstimator(),
                                 init_v=INIT_VELOCITY, caching=True)
     distance_traveled = 0.
+    model_prediction = control_loop.cache['prediction']
     while not collision_check(state.pose, np.array([flower_pose])):
         if check_out_of_arena(state.pose): break
         envelope_left, envelope_right = render(state.pose, objects).values()
@@ -188,7 +189,7 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
             result['step_id_in_course_sequence'].append(id)
             # record estimated flower pose
             if control_loop.cache['prediction'][0]:
-                est_flower_pose = convert_polar_to_cartesian(state.pose, *control_loop.cache['prediction'])
+                est_flower_pose = convert_polar_to_cartesian(state.pose, *model_prediction)
             else: est_flower_pose = np.array([np.nan, np.nan, np.nan])
             if np.any(np.isnan(est_flower_pose)):
                 est_flower_pose = est_flower_pose if control_loop.cache['use_random_walk'] else result['estimated_flower_poses'][-1]
@@ -214,6 +215,9 @@ def run_1_trial(bat_pose: ArrayLike, flower_pose: ArrayLike,
             distance_traveled += state.kinematic[0]*state.dt
             # make new observation here.
             envelope_left, envelope_right = render(state.pose, objects).values()
+
+            model_inputs = np.concatenate([envelope_left, envelope_right]).reshape(1, 2, -1)
+            model_prediction = control_loop.pose_estimator(model_inputs)
 
             if collision_check(state.pose, objects):
                 angle_of_arrival = get_angle_of_arrival(state.pose, flower_pose)
