@@ -45,8 +45,8 @@ N_TRIAL: int = 200
 
 INIT_VELOCITY: float = 0.
 --------------------------------------------------
-DATE: 2024-03-24:
+DATE: 2024-03-27:
 Code is ready for collection.
 Collected 200 trials for each config.
-Data here: https://mailuc-my.sharepoint.com/:f:/g/personal/nguye2t7_mail_uc_edu/EmB9ESXF8KVOnhL25fsVGI8BWsrXk8h8Ihs71li8Czn_Qg?e=rD0LCb
-Link will expired on 09-22-2024.
+Data here: https://mailuc-my.sharepoint.com/:f:/g/personal/nguye2t7_mail_uc_edu/Et8wQ9CTLJNCqrDdGBOwhoEBgBV-8rgP7tFsbl1cocxP_g?e=3sW42S
+Link expired 09-23-24.
